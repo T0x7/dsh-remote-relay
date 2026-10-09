@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Remote Relay",
+    "description": "Reach this dsh from any phone through an outbound PSK-authenticated relay tunnel. Configure the relay URL, shared key, and enable switch on this plugin's detail page."
+  }
+}

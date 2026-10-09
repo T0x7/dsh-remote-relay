@@ -1,0 +1,32 @@
+{
+  "$comment": [
+    "Typecheck boundary for a standalone checkout of this package.",
+    "",
+    "Both dsh peer packages and the dsh client UI packages resolve from npm",
+    "(devDependencies) — they are published alongside dsh itself, so no path",
+    "alias into a sibling dsh checkout is needed or wanted. The peer ranges in",
+    "package.json are the single source of truth for the dsh version line.",
+    "",
+    "The runtime gets these packages from the host dsh installation via",
+    "peerDependencies; the devDependency copies exist for this type checker",
+    "and for the standalone test run."
+  ],
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts"]
+}

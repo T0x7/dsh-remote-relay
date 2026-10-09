@@ -1,0 +1,27 @@
+# Inserts the dsh remote-control plugin. The plugin owns an outbound
+# WebSocket tunnel to a public dsh-remote-relay server (PSK-authenticated)
+# and exposes a settings-section card for pairing-QR generation / revocation.
+#
+# enabled: master switch for the outbound tunnel.
+# relay_url: relay base URL (http(s)://...). The tunnel dials
+#            `<relay_url>` with the /ws/dsh path.
+# psk: pre-shared key checked by the relay's first gate. MUST match the
+#      relay's RELAY_PSK. The default below is the documented insecure
+#      value — the relay refuses to boot in production with it, so a
+#      forgotten override fails closed rather than opening a hole.
+# upstream_host / upstream_port: local dsh engine the data plane fulfils
+#      traffic against (defaults 127.0.0.1:3080).
+# data_root: pairing persistence dir override.
+# engine_token: dsh engine bind token, when the engine requires one. Both
+#      psk and engine_token are role('secret') — they never come back in a
+#      form response or a remote settings read.
+# token_rewrite_prefixes: optional list of plugin realtime WS paths whose
+#      ?token= the tunnel rewrites to the engine token (usually empty).
+
+- insert:
+    - id: dsh-remote
+      name: 'dsh-remote-relay-plugin'
+      config:
+        enabled: false
+        relay_url: 'http://127.0.0.1:8080'
+        psk: 'dsh-remote-relay-default-insecure-psk'

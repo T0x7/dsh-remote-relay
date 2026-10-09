@@ -1,0 +1,60 @@
+name: app
+
+on:
+  push:
+    paths: ["app/**", ".github/workflows/app.yml"]
+  pull_request:
+    paths: ["app/**", ".github/workflows/app.yml"]
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app/packages/dsh_remote_core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - name: Pub get
+        run: dart pub get
+      - name: Analyze (must be clean)
+        run: dart analyze
+      - name: Test (284; a few need a live engine and skip without one)
+        run: dart test
+        env:
+          # Live-engine integration tests SKIP (with a printed reason) when
+          # no engine is listening; they never fail the pipeline.
+          DSH_E2E: "1"
+
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Print versions
+        run: flutter --version
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Analyze (must be clean)
+        run: flutter analyze
+
+      - name: Test (shell 131: widgets, goldens, landscape)
+        run: flutter test

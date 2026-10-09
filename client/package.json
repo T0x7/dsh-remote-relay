@@ -1,0 +1,38 @@
+{
+  "name": "dsh-remote-relay-client",
+  "version": "1.0.0",
+  "description": "Client side of dsh-remote-relay — pairs a local dsh engine with a relay server over a PSK-authenticated outbound WebSocket tunnel",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/T0x7/dsh-remote-relay.git",
+    "directory": "client"
+  },
+  "keywords": ["dsh", "deepseek-harness", "remote-control", "tunnel", "websocket", "cli"],
+  "files": ["dist", "README.md"],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "dsh-remote-client": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.6"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

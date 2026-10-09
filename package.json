@@ -1,0 +1,24 @@
+{
+  "name": "dsh-remote-relay-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Workspace root for dsh-remote-relay — reach a local dsh engine from anywhere",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/T0x7/dsh-remote-relay.git"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "verify": "bash scripts/verify.sh",
+    "e2e": "bash scripts/e2e-smoke.sh"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": []
+  }
+}

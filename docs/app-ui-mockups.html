@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dsh remote · App UI 设计案</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f7f5f0; --card:#ffffff; --line:#e9e3d6; --ink:#14171e; --ink2:#3a4256; --muted:#7c7a72;
+    --accent:#2f6f5e;
+    /* app dark theme tokens */
+    --a-bg:#0e1316; --a-surface:#151c20; --a-high:#1c2529; --a-line:rgba(255,255,255,.07);
+    --a-text:#e8edef; --a-dim:#93a7ae; --a-accent:#34d399; --a-on-accent:#052e1f;
+    --a-amber:#f5b74f; --a-red:#f87171; --a-accent-dim:rgba(52,211,153,.14);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);font-family:'Outfit',sans-serif;font-size:14.5px;line-height:1.6}
+  .page{max-width:1080px;margin:0 auto;padding:40px 28px 72px}
+  .eyebrow{font-size:12px;letter-spacing:.14em;color:var(--accent);font-weight:600;text-transform:uppercase}
+  h1{font-family:'DM Serif Display',serif;font-weight:400;font-size:34px;line-height:1.25;margin:10px 0 12px;letter-spacing:-.005em}
+  .lede{color:var(--ink2);max-width:760px;margin-bottom:8px}
+  h2{font-family:'DM Serif Display',serif;font-weight:400;font-size:24px;margin:0 0 6px}
+  .sec{margin-top:52px}
+  .sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  .sec-num{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted)}
+  .sec-sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+
+  /* tokens */
+  .swatches{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .sw{border:1px solid var(--line);border-radius:12px;background:var(--card);overflow:hidden}
+  .sw .chip{height:52px}
+  .sw .meta{padding:8px 12px 10px}
+  .sw .nm{font-weight:600;font-size:12.5px}
+  .sw .hx{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)}
+  .type-table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:16px}
+  .type-table th,.type-table td{padding:9px 14px;text-align:left;border-bottom:1px solid var(--line);font-size:13px}
+  .type-table th{background:#f2eee4;color:var(--ink2);font-weight:600;font-size:12px}
+  .type-table td:last-child{color:var(--muted)}
+  .rule-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:16px}
+  .rule{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--ink2)}
+  .rule b{color:var(--ink);display:block;margin-bottom:3px;font-size:13.5px}
+
+  /* phone */
+  .phones{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:28px 22px;margin-top:8px}
+  .unit{display:flex;flex-direction:column;gap:10px}
+  .phone{width:100%;max-width:320px;margin:0 auto;background:var(--a-bg);border-radius:42px;border:7px solid #171b1f;
+    box-shadow:0 24px 48px -12px rgba(20,23,30,.28),0 4px 12px rgba(20,23,30,.10);overflow:hidden;position:relative;
+    font-size:13px;color:var(--a-text);display:flex;flex-direction:column}
+  .p-status{display:flex;justify-content:space-between;align-items:center;padding:14px 22px 6px;font-size:12px;font-weight:600}
+  .p-status .r{display:flex;gap:5px;align-items:center}
+  .island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:86px;height:22px;background:#171b1f;border-radius:12px;z-index:5}
+  .p-body{flex:1;display:flex;flex-direction:column;min-height:480px}
+  .ic{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  .ic.s{width:13px;height:13px}.ic.xs{width:11px;height:11px}
+
+  .appbar{display:flex;align-items:center;gap:10px;padding:12px 18px 10px}
+  .appbar .t{font-size:19px;font-weight:600}
+  .appbar .sp{flex:1}
+  .iconbtn{width:32px;height:32px;border-radius:50%;background:var(--a-high);display:flex;align-items:center;justify-content:center;color:var(--a-dim)}
+  .content{flex:1;padding:6px 16px 16px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+
+  .mcard{background:var(--a-surface);border:1px solid var(--a-line);border-radius:18px;padding:12px 16px}
+  .mrow{display:flex;align-items:center;gap:10px}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none}
+  .dot.g{background:var(--a-accent);box-shadow:0 0 8px rgba(52,211,153,.5)}
+  .dot.a{background:var(--a-amber);animation:pulse 1.6s ease-in-out infinite}
+  .dot.r{background:var(--a-red)}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .mname{font-weight:600;font-size:14.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chip{font-family:'JetBrains Mono',monospace;font-size:10.5px;padding:3px 9px;border-radius:999px;background:var(--a-high);color:var(--a-dim);flex:none;white-space:nowrap}
+  .chip.ok{color:var(--a-accent);background:var(--a-accent-dim)}
+  .chip.warn{color:var(--a-amber);background:rgba(245,183,79,.12)}
+  .chip.bad{color:var(--a-red);background:rgba(248,113,113,.12)}
+  .mrelay{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--a-dim);margin:7px 0 0 19px}
+  .msub{display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--a-dim);margin:6px 0 0 19px}
+  .addcard{border:1.5px dashed rgba(255,255,255,.18);border-radius:18px;padding:13px 15px;display:flex;align-items:center;gap:10px;color:var(--a-dim);font-size:13px}
+
+  .tabbar{display:flex;border-top:1px solid var(--a-line);padding:8px 10px 18px;gap:4px}
+  .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:var(--a-dim);padding:4px 0}
+  .tab.on{color:var(--a-accent)}
+
+  .btn{display:flex;align-items:center;justify-content:center;gap:8px;border-radius:14px;padding:12px 16px;font-size:13.5px;font-weight:600;min-height:46px;text-align:center;text-wrap:balance}
+  .btn.sm{min-height:38px;padding:9px 12px;font-size:12px}
+  .btn.fill{background:var(--a-accent);color:var(--a-on-accent)}
+  .btn.outline{border:1px solid rgba(255,255,255,.16);color:var(--a-text)}
+  .btn.tonal{background:var(--a-accent-dim);color:var(--a-accent)}
+  .btn.danger{color:var(--a-red)}
+  .btnrow{display:flex;gap:10px;margin-top:auto}
+  .foot-note{font-size:11px;color:var(--a-dim);text-align:center;margin-top:10px}
+
+  .kv{display:flex;flex-direction:column;gap:0}
+  .kv .row{display:flex;align-items:center;gap:10px;padding:10px 2px;border-bottom:1px solid var(--a-line);font-size:13px}
+  .kv .row:last-child{border-bottom:none}
+  .kv .k{color:var(--a-dim);width:74px;flex:none;font-size:11.5px}
+  .kv .v{flex:1}
+  .mono{font-family:'JetBrains Mono',monospace;font-size:11px}
+  .sect{font-size:11px;letter-spacing:.1em;color:var(--a-dim);font-weight:600;margin:6px 2px 0;text-transform:uppercase}
+
+  .qr-area{position:relative;flex:1;margin:10px 18px;border-radius:20px;background:#0a0f12;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .corner{position:absolute;width:26px;height:26px;border:3px solid var(--a-accent);border-radius:6px}
+  .c1{top:14px;left:14px;border-right:none;border-bottom:none}
+  .c2{top:14px;right:14px;border-left:none;border-bottom:none}
+  .c3{bottom:14px;left:14px;border-right:none;border-top:none}
+  .c4{bottom:14px;right:14px;border-left:none;border-top:none}
+  .scanline{position:absolute;left:24px;right:24px;height:2px;background:linear-gradient(90deg,transparent,var(--a-accent),transparent);animation:scan 2.6s ease-in-out infinite}
+  @keyframes scan{0%,100%{top:22%}50%{top:74%}}
+  .qr-fake{display:grid;grid-template-columns:repeat(9,7px);grid-auto-rows:7px;gap:2px;opacity:.92}
+  .qr-fake i{background:#3d4a52;border-radius:1px}
+  .qr-fake i.d{background:var(--a-text)}
+
+  .bubble{max-width:86%;padding:9px 13px;border-radius:16px;font-size:12.8px;line-height:1.5}
+  .b-user{align-self:flex-end;background:var(--a-accent-dim);color:var(--a-text);border-bottom-right-radius:5px}
+  .b-agent{align-self:flex-start;background:var(--a-surface);border:1px solid var(--a-line);border-bottom-left-radius:5px}
+  .jobtag{display:inline-flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--a-accent);background:var(--a-accent-dim);border-radius:8px;padding:4px 8px;margin-top:7px}
+  .inputbar{display:flex;align-items:center;gap:8px;background:var(--a-high);border-radius:14px;padding:9px 12px;color:var(--a-dim);font-size:12.5px}
+  .inputbar .send{margin-left:auto;width:30px;height:30px;border-radius:50%;background:var(--a-accent);color:var(--a-on-accent);display:flex;align-items:center;justify-content:center}
+
+  .seg{display:flex;background:var(--a-high);border-radius:11px;padding:3px;margin:2px 0 6px}
+  .seg span{flex:1;text-align:center;font-size:11.5px;padding:5px 0;border-radius:9px;color:var(--a-dim)}
+  .seg .on{background:var(--a-surface);color:var(--a-text);font-weight:600}
+
+  .task{display:flex;flex-direction:column;gap:7px}
+  .t-head{display:flex;align-items:center;gap:8px;font-size:12.5px}
+  .t-head .id{font-family:'JetBrains Mono',monospace;color:var(--a-dim);font-size:11px}
+  .t-head .st{margin-left:auto;font-size:11px}
+  .prog{height:4px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+  .prog i{display:block;height:100%;background:var(--a-accent);border-radius:3px}
+  .t-sub{font-size:11px;color:var(--a-dim)}
+  .err{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--a-red);background:rgba(248,113,113,.09);border-radius:7px;padding:4px 8px}
+
+  .setrow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--a-line)}
+  .setrow:last-child{border-bottom:none}
+  .setrow .ic{color:var(--a-dim)}
+  .setrow .lb{font-size:13.5px;font-weight:500}
+  .setrow .sb{font-size:11px;color:var(--a-dim);margin-top:1px}
+  .setrow .txt{flex:1}
+  .sw2{position:relative;width:40px;height:23px;border-radius:999px;background:var(--a-accent);flex:none}
+  .sw2::after{content:"";position:absolute;right:2px;top:2px;width:19px;height:19px;border-radius:50%;background:#fff}
+  .sw2.off{background:rgba(255,255,255,.14)}
+  .sw2.off::after{right:auto;left:2px;background:var(--a-dim)}
+
+  .lockwrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px}
+  .appmark{width:64px;height:64px;border-radius:19px;background:var(--a-accent-dim);border:1px solid rgba(52,211,153,.3);display:flex;align-items:center;justify-content:center;color:var(--a-accent)}
+  .failmark{width:64px;height:64px;border-radius:50%;background:rgba(248,113,113,.10);border:1px solid rgba(248,113,113,.28);display:flex;align-items:center;justify-content:center;color:var(--a-red)}
+  .warnmark{width:56px;height:56px;border-radius:50%;background:rgba(245,183,79,.10);border:1px solid rgba(245,183,79,.3);display:flex;align-items:center;justify-content:center;color:var(--a-amber)}
+  .facebtn{width:64px;height:64px;border-radius:50%;border:1.5px solid rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;color:var(--a-text);margin-top:8px}
+
+  .timeline{list-style:none;position:relative;margin:18px 0 4px;padding-left:26px}
+  .timeline::before{content:"";position:absolute;left:7px;top:8px;bottom:8px;width:2px;background:var(--accent);opacity:.3}
+  .timeline li{position:relative;padding:0 0 16px 12px}
+  .timeline li::before{content:"";position:absolute;left:-24px;top:4px;width:12px;height:12px;border-radius:50%;background:var(--paper);border:2.5px solid var(--accent)}
+  .timeline li.warn::before{border-color:#b07f24}
+  .timeline li.bad::before{border-color:#b34a4a}
+  .timeline b{font-size:13.5px}
+  .timeline p{font-size:12.5px;color:var(--ink2);margin:1px 0 0}
+
+  .banner{display:flex;gap:8px;align-items:center;background:rgba(245,183,79,.10);border:1px solid rgba(245,183,79,.25);color:var(--a-amber);border-radius:12px;padding:8px 12px;font-size:11.5px}
+
+  /* console composer additions */
+  .ctxbar{display:flex;align-items:center;gap:7px;padding:2px 2px 0}
+  .statpill{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#93a7ae;background:var(--a-high);border-radius:6px;padding:2px 7px;white-space:nowrap}
+  .sheetwrap{flex:1;display:flex;flex-direction:column;justify-content:flex-end;background:rgba(0,0,0,.28)}
+  .sheet{background:#12181c;border-radius:26px 26px 0 0;border-top:1px solid rgba(255,255,255,.09);padding:14px 18px 24px;display:flex;flex-direction:column;gap:10px}
+  .grab{width:36px;height:4px;border-radius:2px;background:rgba(255,255,255,.16);margin:0 auto 2px}
+  .sheet-title{font-size:13.5px;font-weight:600;text-align:center}
+  .mrow2{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:14px;background:var(--a-surface);border:1px solid var(--a-line)}
+  .mrow2.on{border-color:rgba(52,211,153,.45);background:var(--a-accent-dim)}
+  .mrow2 .nm{font-size:13px;font-weight:600}
+  .mrow2 .ds{font-size:10.5px;color:#93a7ae;margin-top:2px}
+  .chip.sel{color:#34d399;background:var(--a-accent-dim);border:1px solid rgba(52,211,153,.4)}
+  .segbar{display:flex;height:10px;border-radius:6px;overflow:hidden;background:rgba(255,255,255,.07)}
+  .leg{display:flex;align-items:center;gap:8px;font-size:12px;padding:3px 0}
+  .leg i{width:9px;height:9px;border-radius:3px;flex:none}
+  .leg .lb{flex:1;color:#c8d4d9}
+  .leg .vv{font-family:'JetBrains Mono',monospace;font-size:11px;color:#93a7ae}
+  .sessrow{display:flex;flex-direction:column;gap:3px;padding:11px 14px;border-radius:14px;background:var(--a-surface);border:1px solid var(--a-line)}
+  .sessrow.on{border-color:rgba(52,211,153,.45)}
+  .subrow{display:flex;flex-direction:column;gap:3px;padding:9px 14px;margin-left:18px;border-radius:12px;background:rgba(255,255,255,.025);border:1px dashed rgba(255,255,255,.1)}
+  .lineage{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#5eead4;opacity:.85;font-family:'JetBrains Mono',monospace;margin-bottom:5px}
+  .badge{position:relative}
+  .badge::after{content:"2";position:absolute;top:-4px;right:-6px;min-width:13px;height:13px;border-radius:7px;background:var(--a-accent);color:var(--a-on-accent);font-size:8.5px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px}
+  .snackbar{display:flex;align-items:center;gap:8px;background:#232e34;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:12px 16px;font-size:12px;color:#e8edef;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+  .snackbar .act{margin-left:auto;color:#34d399;font-weight:600;font-size:11.5px}
+  .err-table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:14px;font-size:12.5px}
+  .err-table th,.err-table td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  .err-table th{background:#f2eee4;color:var(--ink2);font-weight:600;font-size:11.5px}
+  .err-table td.mono{font-size:10.5px;white-space:nowrap}
+  .layer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:14px}
+  .layer{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .layer .lv{font-size:11px;font-weight:700;letter-spacing:.05em;margin-bottom:4px}
+  .layer b.nm{font-size:13.5px;display:block;margin-bottom:3px}
+  .layer p{font-size:12px;color:var(--ink2);margin:0}
+
+  /* captions */
+  .cap{max-width:320px;margin:0 auto;width:100%}
+  .cap .t{font-weight:600;font-size:14px;margin-bottom:2px}
+  .cap .idx{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--accent)}
+  .cap ul{list-style:none;margin-top:6px;display:flex;flex-direction:column;gap:4px}
+  .cap li{font-size:12.5px;color:var(--ink2);padding-left:14px;position:relative}
+  .cap li::before{content:"";position:absolute;left:2px;top:8px;width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.6}
+
+  /* state cards */
+  .states{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+  .state{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 17px}
+  .state .tg{font-size:11px;font-weight:600;letter-spacing:.04em;margin-bottom:4px}
+  .state p{font-size:12.8px;color:var(--ink2)}
+  .state .mono{font-size:11px}
+  .g{color:#2f6f5e}.y{color:#b07f24}.r{color:#b34a4a}
+
+  footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  @media (max-width:820px){ .errwrap{grid-template-columns:1fr !important} .errwrap .unit{margin:0 auto} }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="eyebrow">dsh-remote-relay · App UI 设计案 v1 · 2026-09-30</div>
+  <h1>手机 App 界面设计<br>Material 3 · 深色优先 · 状态色语义</h1>
+  <p class="lede">App 是 relay 的原生客户端（<span class="mono" style="font-size:12px">Flutter</span>），界面围绕一件事组织：<b>每台机器的连接状态一眼可读</b>。设计语言取 Flutter 原生的 Material 3，深色优先、浅色随系统；色彩系统里只有三种语义状态——绿（已连接）、琥珀（重连/临期）、红（失效/危险），主色翡翠绿只用于可执行动作，不与状态色混用。</p>
+
+  <!-- ============ TOKENS ============ -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">01</span><h2>设计语言与 Token</h2></div>
+    <p class="sec-sub">深色主题为默认主题（运维/监控工具的主场景）；浅色主题由同一套 seed 色生成，随系统切换。等宽字体（JetBrains Mono）专用于 sessionId、relay URL、job id 与证书指纹——凭证明材料永远和普通文案区分开。</p>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#0e1316"></div><div class="meta"><div class="nm">背景 Background</div><div class="hx">#0E1316</div></div></div>
+      <div class="sw"><div class="chip" style="background:#151c20"></div><div class="meta"><div class="nm">卡片 Surface</div><div class="hx">#151C20</div></div></div>
+      <div class="sw"><div class="chip" style="background:#1c2529"></div><div class="meta"><div class="nm">高层面 High</div><div class="hx">#1C2529</div></div></div>
+      <div class="sw"><div class="chip" style="background:#e8edef"></div><div class="meta"><div class="nm">主文字 OnSurface</div><div class="hx">#E8EDEF</div></div></div>
+      <div class="sw"><div class="chip" style="background:#93a7ae"></div><div class="meta"><div class="nm">次文字 Variant</div><div class="hx">#93A7AE</div></div></div>
+      <div class="sw"><div class="chip" style="background:#34d399"></div><div class="meta"><div class="nm">主色 Accent</div><div class="hx">#34D399</div></div></div>
+      <div class="sw"><div class="chip" style="background:#f5b74f"></div><div class="meta"><div class="nm">状态·琥珀</div><div class="hx">#F5B74F</div></div></div>
+      <div class="sw"><div class="chip" style="background:#f87171"></div><div class="meta"><div class="nm">状态·红</div><div class="hx">#F87171</div></div></div>
+    </div>
+    <table class="type-table">
+      <tr><th>层级</th><th>规格</th><th>用途</th></tr>
+      <tr><td>页面标题</td><td>20 / 600</td><td>App bar 大标题（机器、设置）</td></tr>
+      <tr><td>卡片标题</td><td>14.5 / 600</td><td>机器名、任务名</td></tr>
+      <tr><td>正文</td><td>13 / 400</td><td>列表、对话气泡</td></tr>
+      <tr><td>辅助</td><td>11.5 / 400 · Variant 色</td><td>relay 地址、时间、次要信息</td></tr>
+      <tr><td>等宽</td><td>10.5–11 · JetBrains Mono</td><td>id / URL / 指纹 / 错误码</td></tr>
+    </table>
+    <div class="rule-grid">
+      <div class="rule"><b>状态点 StatusDot</b>9px 圆点。已连接=常亮绿带微光；重连中=琥珀呼吸动画；失效=红。列表、详情、控制台顶栏三处同语义同色。</div>
+      <div class="rule"><b>倒计时芯片 CountdownChip</b>会话剩余时间按时余着色：≥6h 中性、1–6h 琥珀、&lt;1h 或续期失败=红。点击展开续期详情。</div>
+      <div class="rule"><b>导航结构</b>底部三 Tab（机器 / 控制 / 设置）；配对流、机器详情、锁屏为全屏流，无底部导航。</div>
+      <div class="rule"><b>危险操作</b>吊销全部配对、断开中继均为二次确认对话框；确认框内写明后果（"所有设备立即失效"）。</div>
+      <div class="rule"><b>i18n · 仅中英（已拍板）</b>v1 随包 zh/en：跟随系统 + 手动切换；全部文案经 Flutter intl 资源键（零硬编码）。引擎下发内容（模型目录、错误码）按原文展示不翻译。例：<span style="font-size:12px">会话已失效 → Session expired · 重新扫码 → Re-scan QR</span></div>
+    </div>
+
+    <table class="type-table" style="margin-top:16px">
+      <tr><th>间距/尺寸 Token</th><th>值</th><th>用途（4px 基数网格，全部间距取自此表）</th></tr>
+      <tr><td>xs / s</td><td>4 / 8</td><td>图标与文字间隙 / 卡片内行间、紧凑列表（详情、设置）</td></tr>
+      <tr><td>m / l</td><td>12 / 16</td><td>卡片列表纵向间距、卡片横向内边距 / 卡片纵向内边距、屏边距</td></tr>
+      <tr><td>xl / xxl</td><td>20 / 24</td><td>模态内边距 / 分区间距、sheet 顶部</td></tr>
+      <tr><td>按钮高度</td><td>48（主）/ 38（紧凑 sm）</td><td>全宽行动按钮 / 卡片内次要按钮（审批允许/拒绝）</td></tr>
+      <tr><td>输入栏 / 底栏</td><td>56 / 64+安全区</td><td>对话输入条 / 底部导航（gesture bar 安全区动态补齐）</td></tr>
+      <tr><td>触达目标</td><td>≥44×44（iOS）/ ≥48×48（Android）</td><td>视觉尺寸可小（状态点 9px、图标 16px），<b>触达热区不缩</b>——用 padding 撑，不用视觉放大</td></tr>
+    </table>
+
+    <div class="rule-grid">
+      <div class="rule"><b>按钮 · 允许两行，不许撑宽</b>按钮宽度永远由容器决定（全宽或 flex 均分），文案超长自动两行居中（text-wrap: balance），<b>绝不横向溢出或把卡片撑变形</b>。最长实测对：在浏览器打开完整 Web 界面 / Open full web UI in browser（两行正常）。</div>
+      <div class="rule"><b>芯片/胶囊 · nowrap + ellipsis</b>倒计时、模型、状态芯片单行不换行；超长截断省略号（悬浮/点按看全文）。机器名同规则——长主机名（如 homelab-nuc-01.lan）不得把倒计时芯片挤出屏幕。时间/数字用等宽且<b>语言无关</b>：23h 41m、48.6K/128K、job#483 中英完全一致。</div>
+      <div class="rule"><b>横幅/标题 · 高度自适应</b>L3 横幅与页标题允许占两行，高度随内容增长——横幅文案最长对：中继不可达·正在自动重连（第 2 次） / Relay unreachable · auto-reconnecting (attempt 2)。Tab 标签例外：永远单行，选短词（机器/控制/设置 → Machines/Console/Settings）。</div>
+      <div class="rule"><b>动态字体 · 130% 无损</b>跟随系统字体缩放至 130% 布局不破（Flutter sp 字号 + Wrap/Flex 布局实测清单）；关键读数（倒计时、token 数、错误码）固定等宽防抖动。超出 130% 降级为加大行距的单列布局，不出现横向滚动。</div>
+    </div>
+  </section>
+
+  <!-- ============ SCREENS ============ -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">02</span><h2>核心屏幕（15 屏）</h2></div>
+    <p class="sec-sub">覆盖 v1 全部界面：机器列表 · 扫码 · 确认锁定 · 机器详情 · 控制台（对话/任务）· 模型与思考等级 · 上下文分解 · 会话 · 子代理团队 · <b>提问/选择</b> · 设置 · 锁屏 · 会话失效 · 配对失败。信息面对齐 dsh web（证据：dsh-root ui-model-selection / ui-conversation·ContextMeter / ui-chat·StatsPills / ui-approval / ui-user-questions / ui-session / ui-subagent）。</p>
+    <div class="phones">
+
+      <!-- A 机器列表 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r">
+            <svg class="ic xs" viewBox="0 0 24 24"><path d="M4 20h2v-6H4zM9 20h2v-9H9zM14 20h2V7h-2zM19 20h2V4h-2z"/></svg>
+            <svg class="ic xs" viewBox="0 0 24 24"><path d="M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0"/><circle cx="12" cy="18.5" r="1" fill="currentColor" stroke="none"/></svg>
+            <svg class="ic xs" viewBox="0 0 24 24"><rect x="2" y="8" width="17" height="9" rx="2.5"/><path d="M22 11.5v2.5"/></svg>
+          </span></div>
+          <div class="p-body">
+            <div class="appbar"><span class="t">机器</span><span class="sp"></span><span class="iconbtn"><svg class="ic s" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span></div>
+            <div class="content">
+              <div class="mcard">
+                <div class="mrow"><span class="dot g"></span><span class="mname">Mac mini · 工作室</span><span class="chip ok">23h 41m</span></div>
+                <div class="mrelay">relay.example.com</div>
+                <div class="msub"><svg class="ic xs" viewBox="0 0 24 24"><path d="M9.5 14a3.5 3.5 0 0 0 5 0M10 10h.01M14 10h.01M6 4H4v2M20 4h-2v0M4 6v0"/><path d="M6 4h12v0M6 4v0M4 8V6h2M18 4h2v2M20 16v2h-2M6 20H4v-2"/></svg>隧道 已连接 · 设备 2/2 在线</div>
+              </div>
+              <div class="mcard">
+                <div class="mrow"><span class="dot a"></span><span class="mname">ThinkPad X1</span><span class="chip warn">3h 12m</span></div>
+                <div class="mrelay"><relay-host></div>
+                <div class="msub">隧道 重连中 · 最后在线 5 分钟前</div>
+              </div>
+              <div class="mcard">
+                <div class="mrow"><span class="dot r"></span><span class="mname">Homelab NUC</span><span class="chip bad">已过期</span></div>
+                <div class="mrelay"><relay-host></div>
+                <div class="msub">会话超 30 天上限 · 需重新扫码
+                  <span style="margin-left:auto"></span></div>
+                <div class="btnrow" style="margin-top:10px"><span class="btn outline" style="flex:1;padding:8px">重新配对</span></div>
+              </div>
+              <div class="addcard"><svg class="ic" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><rect x="9" y="9" width="2.5" height="2.5"/><rect x="14.5" y="9" width="2.5" height="2.5"/><rect x="9" y="14.5" width="2.5" height="2.5"/><rect x="14.5" y="14.5" width="2.5" height="2.5"/></svg>扫码 / 粘贴链接添加机器</div>
+            </div>
+            <div class="tabbar">
+              <span class="tab on"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>机器</span>
+              <span class="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>控制</span>
+              <span class="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>设置</span>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">A</span> <span class="t">机器列表 · 首页</span>
+          <ul><li>一张卡片一台机器：状态点 + 名称 + 会话倒计时 + relay 地址 + 一行摘要</li><li>三种卡片态同屏可辨：正常 / 重连中（呼吸点）/ 过期（内联"重新配对"）</li></ul>
+        </div>
+      </div>
+
+      <!-- B 扫码 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">扫码配对</span></div>
+          <div class="p-body">
+            <div class="appbar"><span class="iconbtn"><svg class="ic s" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></span><span class="t" style="font-size:16px">扫码配对</span><span class="sp"></span></div>
+            <div class="qr-area">
+              <span class="corner c1"></span><span class="corner c2"></span><span class="corner c3"></span><span class="corner c4"></span>
+              <span class="scanline"></span>
+              <div class="qr-fake">
+                <i class="d"></i><i class="d"></i><i class="d"></i><i></i><i></i><i class="d"></i><i></i><i class="d"></i><i></i>
+                <i class="d"></i><i></i><i class="d"></i><i class="d"></i><i></i><i></i><i class="d"></i><i></i><i></i>
+                <i class="d"></i><i></i><i></i><i></i><i class="d"></i><i class="d"></i><i></i><i class="d"></i><i class="d"></i>
+                <i></i><i class="d"></i><i class="d"></i><i></i><i></i><i class="d"></i><i></i><i></i><i class="d"></i>
+                <i></i><i></i><i class="d"></i><i class="d"></i><i></i><i></i><i class="d"></i><i class="d"></i><i></i>
+                <i class="d"></i><i class="d"></i><i></i><i></i><i class="d"></i><i></i><i></i><i class="d"></i><i></i>
+                <i></i><i></i><i class="d"></i><i></i><i></i><i class="d"></i><i class="d"></i><i></i><i class="d"></i>
+                <i class="d"></i><i class="d"></i><i></i><i class="d"></i><i></i><i></i><i></i><i class="d"></i><i></i>
+                <i></i><i></i><i class="d"></i><i></i><i class="d"></i><i class="d"></i><i></i><i></i><i class="d"></i>
+              </div>
+            </div>
+            <div class="foot-note" style="margin:4px 0 10px">对准 dsh 插件「远程控制」卡片<br>或终端 <span class="mono">dsh-remote-client pair</span> 打印的二维码</div>
+            <div style="padding:0 18px 22px"><div class="btn outline"><svg class="ic s" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>改为粘贴配对链接</div></div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">B</span> <span class="t">配对 · 扫码</span>
+          <ul><li>二维码来源：dsh 插件设置卡或 CLI <span class="mono" style="font-size:11px">pair</span> 输出的终端二维码</li><li>App 只解析 URL 组 Bearer，<b>不请求该链接</b>（避免触发 relay 的设备轮换踢人，设计案 §4.1）</li></ul>
+        </div>
+      </div>
+
+      <!-- C 确认 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">确认机器</span></div>
+          <div class="p-body">
+            <div class="appbar"><span class="iconbtn"><svg class="ic s" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></span><span class="t" style="font-size:16px">确认机器</span></div>
+            <div class="content">
+              <div class="mcard" style="padding:8px 16px">
+                <div class="kv">
+                  <div class="row"><span class="k">中继</span><span class="v mono" style="color:#34d399">https://relay.example.com</span></div>
+                  <div class="row"><span class="k">机器</span><span class="v">Mac mini · 工作室</span></div>
+                  <div class="row"><span class="k">会话</span><span class="v">24 小时 · 到期前自动续期</span></div>
+                  <div class="row"><span class="k">证书锁定</span><span class="v"><span class="mono">SHA-256&nbsp;a3:9f:2c…e1</span><br><span style="font-size:10.5px;color:#93a7ae">首次锁定（TOFU）· 此后每次连接校验</span></span></div>
+                </div>
+              </div>
+              <div class="mcard" style="background:rgba(52,211,153,.07);border-color:rgba(52,211,153,.2)">
+                <div class="msub" style="margin:0;color:#93a7ae"><svg class="ic xs" viewBox="0 0 24 24" style="color:#34d399"><path d="M12 22s8-3 8-10V5l-8-3-8 3v7c0 7 8 10 8 10z"/></svg>凭证只存本机安全存储（Keychain / Keystore），不经任何第三方服务</div>
+              </div>
+              <div class="btnrow">
+                <span class="btn outline" style="flex:1">取消</span>
+                <span class="btn fill" style="flex:1.6"><svg class="ic s" viewBox="0 0 24 24"><path d="M12 22s8-3 8-10V5l-8-3-8 3v7c0 7 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>锁定并连接</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">C</span> <span class="t">配对 · 确认与 TOFU 锁定</span>
+          <ul><li>确认页四要素：relay、机器名（QR <span class="mono" style="font-size:11px">name</span> 参数）、会话时长、证书指纹</li><li>指纹即 TOFU 首锁时刻——自签部署（gen-selfsigned）也能安全锁定；设置页可管理已锁定列表</li></ul>
+        </div>
+      </div>
+
+      <!-- D 机器详情 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">详情</span></div>
+          <div class="p-body">
+            <div class="appbar"><span class="iconbtn"><svg class="ic s" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></span><span class="t" style="font-size:16px">Mac mini · 工作室</span><span class="dot g" style="margin-left:2px"></span></div>
+            <div class="content" style="gap:8px">
+              <div class="sect">隧道</div>
+              <div class="mcard" style="padding:8px 16px"><div class="kv">
+                <div class="row"><span class="k">状态</span><span class="v" style="color:#34d399;font-weight:600">已连接 · 无中断 2h 17m</span></div>
+                <div class="row"><span class="k">中继</span><span class="v mono">relay.example.com</span></div>
+              </div></div>
+              <div class="sect">会话</div>
+              <div class="mcard" style="padding:12px 16px">
+                <div class="mrow" style="justify-content:space-between"><span style="font-size:12.5px">剩余 <b>18h 22m</b></span><span class="chip ok">自动续期 22:00</span></div>
+                <div class="prog" style="margin:9px 0 4px"><i style="width:76%"></i></div>
+                <div class="t-sub">会话寿命 第 4 / 30 天（到期须重扫）</div>
+                <div class="prog" style="margin:8px 0 2px"><i style="width:13%;background:#93a7ae"></i></div>
+              </div>
+              <div class="sect">设备 · 2 已配对 / 2 在线</div>
+              <div class="mcard" style="padding:8px 16px"><div class="kv">
+                <div class="row"><span class="k">iPhone</span><span class="v" style="font-size:12px">本机 · 现在</span></div>
+                <div class="row"><span class="k">MacBook</span><span class="v" style="font-size:12px">5 分钟前 · events 流</span></div>
+              </div></div>
+              <div class="btnrow" style="flex-direction:column;gap:8px">
+                <span class="btn tonal"><svg class="ic s" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>显示配对二维码（添加其他设备）</span>
+                <span class="btn outline"><svg class="ic s" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3"/></svg>在浏览器打开完整 Web 界面</span>
+                <span class="btn outline">断开中继</span>
+                <span class="btn danger">吊销全部配对…</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">D</span> <span class="t">机器详情</span>
+          <ul><li>两条进度条分开表达两个时钟：24h 续期周期 与 30 天会话硬上限</li><li>数据全部来自 <span class="mono" style="font-size:11px">GET /dsh-remote/session</span>（隧道态 + 配对 + 设备）</li></ul>
+        </div>
+      </div>
+
+      <!-- E 对话 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">控制台</span></div>
+          <div class="p-body">
+            <div class="appbar" style="padding-bottom:6px;gap:6px">
+              <span class="chip ok" style="padding:6px 11px;font-size:11px;color:#34d399"><span class="dot g" style="width:7px;height:7px;margin-right:6px"></span>Mac mini ▾</span>
+              <span class="chip" style="padding:6px 11px;font-size:11px;font-family:'Outfit',sans-serif"><svg class="ic xs" viewBox="0 0 24 24" style="margin-right:5px;vertical-align:-2px"><path d="M12 8V4H8l4 4zM2 12h20M12 2v2M5 20h14l2-8H3l2 8z"/></svg>deepseek-chat · High ▾</span>
+              <span class="sp"></span>
+              <span class="iconbtn badge" title="子代理团队"><svg class="ic xs" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+              <span class="iconbtn" style="width:auto;padding:0 10px;gap:6px;font-size:11px"><svg class="ic xs" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5"/></svg>重连</span>
+            </div>
+            <div style="padding:0 16px"><div class="seg"><span class="on">对话</span><span>任务</span><span>主机</span></div></div>
+            <div class="content">
+              <div class="bubble b-user">把回测窗口改成 90 天，重新跑一遍</div>
+              <div class="bubble b-agent">已安排 researcher 子代理检索同窗口的历史研报，随后更新参数并执行：<br>
+                <span class="jobtag" style="color:#f5b74f;background:rgba(245,183,79,.12)"><svg class="ic xs" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>请求执行 · shell</span>
+              </div>
+              <div class="mcard" style="border-color:rgba(245,183,79,.35);background:rgba(245,183,79,.05);padding:11px 13px">
+                <div class="mono" style="font-size:10.5px;color:#93a7ae">python scripts/backtest.py --window 90d</div>
+                <div style="display:flex;gap:8px;margin-top:9px"><span class="btn outline sm" style="flex:1">拒绝</span><span class="btn fill sm" style="flex:1">允许</span></div>
+              </div>
+              <div class="bubble b-agent"><span class="lineage"><svg class="ic xs" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg>researcher · 子代理</span>已检索 6 篇研报，波动率结论已回传主会话（完整输出在团队页，屏 N）。</div>
+              <div style="margin-top:auto"></div>
+              <div class="ctxbar">
+                <svg width="17" height="17" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="rgba(255,255,255,.13)" stroke-width="2.4"/><circle cx="8" cy="8" r="6" fill="none" stroke="#34d399" stroke-width="2.4" stroke-dasharray="14.3 37.7" stroke-linecap="round" transform="rotate(-90 8 8)"/></svg>
+                <span style="font-size:11px;color:#93a7ae">上下文 38%</span>
+                <span class="statpill">12.4 tok/s</span>
+                <span class="statpill">缓存 71%</span>
+                <span style="flex:1"></span>
+                <span style="font-size:11px;color:#34d399">4 轮 · 3m12s</span>
+              </div>
+              <div class="inputbar"><svg class="ic s" viewBox="0 0 24 24" style="color:#93a7ae"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>发消息给 agent…<span class="send"><svg class="ic s" viewBox="0 0 24 24"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/></svg></span></div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">E</span> <span class="t">控制台 · 对话（对齐 web 信息面）</span>
+          <ul><li>顶栏：机器芯片 + <b>模型·档位</b>芯片（屏 K）+ <b>子代理团队入口</b>（徽标=运行数，屏 N）</li><li>对话流内嵌<b>审批卡</b>（参数等宽 + 允许/拒绝）与<b>子代理 lineage 气泡</b>（哪条输出来自哪个子代理）</li><li>输入栏上方<b>上下文占用环</b>（屏 L）+ 统计胶囊；PRIVILEGED 方法 403 时对话内说明原因，不静默</li></ul>
+        </div>
+      </div>
+
+      <!-- F 任务 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">控制台</span></div>
+          <div class="p-body">
+            <div class="appbar" style="padding-bottom:6px">
+              <span class="chip ok" style="padding:6px 12px;font-size:11px;color:#34d399"><span class="dot g" style="width:7px;height:7px;margin-right:6px"></span>Mac mini ▾</span>
+            </div>
+            <div style="padding:0 16px"><div class="seg"><span>对话</span><span class="on">任务</span><span>主机</span></div></div>
+            <div class="content">
+              <div class="mcard task">
+                <div class="t-head"><span class="id">job#483</span><span>paper_backtest</span><span class="st" style="color:#34d399">运行中 62%</span></div>
+                <div class="prog"><i style="width:62%"></i></div>
+                <div class="t-sub">12 分钟前启动 · 实时进度来自 events 流</div>
+              </div>
+              <div class="mcard task">
+                <div class="t-head"><span class="id">job#481</span><span>paper_backtest</span><span class="st" style="color:#93a7ae">完成 09:14</span></div>
+                <div class="t-sub"><svg class="ic xs" viewBox="0 0 24 24" style="color:#34d399;vertical-align:-2px"><path d="M20 6 9 17l-5-5"/></svg> 点击查看结果摘要</div>
+              </div>
+              <div class="mcard task">
+                <div class="t-head"><span class="id">job#479</span><span>data_sync</span><span class="st" style="color:#f87171">失败</span></div>
+                <div class="err">ECONNREFUSED 127.0.0.1:6379</div>
+              </div>
+              <div class="foot-note" style="margin:2px 0 0">下拉刷新 · 数据来自 /api 任务方法 + events.mux</div>
+            </div>
+            <div class="tabbar">
+              <span class="tab"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>机器</span>
+              <span class="tab on"><svg class="ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>控制</span>
+              <span class="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>设置</span>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">F</span> <span class="t">控制台 · 任务</span>
+          <ul><li>任务卡三态：运行中（进度条）/ 完成 / 失败（错误码等宽展示，一眼定位）</li><li>进度与状态经 <span class="mono" style="font-size:11px">/api/events.mux</span> 推送，不轮询</li></ul>
+        </div>
+      </div>
+
+      <!-- G 设置 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">设置</span></div>
+          <div class="p-body">
+            <div class="appbar"><span class="t">设置</span></div>
+            <div class="content" style="gap:8px">
+              <div class="mcard" style="padding:2px 16px">
+                <div class="setrow"><svg class="ic" viewBox="0 0 24 24"><path d="M6 4H4v2M20 4h-2M4 6v0M4 8V6h2M18 4h2v2M20 16v2h-2M6 20H4v-2"/><path d="M9 10h.01M15 10h.01M9.5 14a3.5 3.5 0 0 0 5 0"/></svg><span class="txt"><span class="lb">生物识别锁</span><span class="sb" style="display:block">Face ID / 指纹 · 解锁后才解密凭证</span></span><span class="sw2"></span></div>
+                <div class="setrow"><svg class="ic" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><span class="txt"><span class="lb">证书锁定 (TOFU)</span><span class="sb" style="display:block">3 台已锁定 · 查看指纹</span></span><svg class="ic s" viewBox="0 0 24 24" style="color:#93a7ae"><path d="m9 18 6-6-6-6"/></svg></div>
+                <div class="setrow"><svg class="ic" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg><span class="txt"><span class="lb">前台提醒</span><span class="sb" style="display:block">隧道断开 · 任务完成（仅 App 打开时，无后台推送）</span></span><span class="sw2"></span></div>
+                <div class="setrow"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg><span class="txt"><span class="lb">语言</span><span class="sb" style="display:block">跟随系统 · 中文 / English（仅此两种）</span></span><svg class="ic s" viewBox="0 0 24 24" style="color:#93a7ae"><path d="m9 18 6-6-6-6"/></svg></div>
+                <div class="setrow"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg><span class="txt"><span class="lb">关于</span><span class="sb" style="display:block">v0.1.0 · 隧道协议 v:1 · MIT 开源</span></span><svg class="ic s" viewBox="0 0 24 24" style="color:#93a7ae"><path d="m9 18 6-6-6-6"/></svg></div>
+              </div>
+              <div class="foot-note" style="margin-top:12px">零遥测 · 零崩溃收集 · 零第三方 SDK<br>全部源码随 dsh-remote-relay 开源</div>
+            </div>
+            <div class="tabbar">
+              <span class="tab"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>机器</span>
+              <span class="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>控制</span>
+              <span class="tab on"><svg class="ic" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>设置</span>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">G</span> <span class="t">设置</span>
+          <ul><li>五个组就够：锁 / 证书 / 提醒 / 语言 / 关于——不出现任何账号体系</li><li>"前台提醒"开关明说边界：仅 App 打开时，无后台推送（2026-09-30 拍板）</li></ul>
+        </div>
+      </div>
+
+      <!-- H 锁屏 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae"></span></div>
+          <div class="p-body">
+            <div class="lockwrap">
+              <div class="appmark"><svg class="ic" style="width:28px;height:28px" viewBox="0 0 24 24"><path d="M12 22s8-3 8-10V5l-8-3-8 3v7c0 7 8 10 8 10z"/></svg></div>
+              <div style="text-align:center">
+                <div style="font-size:16px;font-weight:600">dsh remote 已锁定</div>
+                <div style="font-size:11.5px;color:#93a7ae;margin-top:4px">解锁后才会解密会话凭证</div>
+              </div>
+              <div class="facebtn"><svg class="ic" style="width:26px;height:26px" viewBox="0 0 24 24"><path d="M6 4H4v2M20 4h-2M4 8V6h2M18 4h2v2M20 16v2h-2M6 20H4v-2"/><path d="M9 10h.01M15 10h.01M9.5 14a3.5 3.5 0 0 0 5 0"/></svg></div>
+              <span style="font-size:11.5px;color:#93a7ae">改用密码解锁</span>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">H</span> <span class="t">锁屏（冷启动 / 切回前台）</span>
+          <ul><li>生物识别默认开启；解锁是凭证解密的前置条件，不是可选装饰</li><li>切后台超时（默认立即）重新上锁</li></ul>
+        </div>
+      </div>
+
+      <!-- I 会话失效页 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">会话失效</span></div>
+          <div class="p-body">
+            <div class="appbar"><span class="iconbtn"><svg class="ic s" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></span><span class="t" style="font-size:16px">Mac mini · 工作室</span><span class="dot r" style="margin-left:2px"></span></div>
+            <div class="content">
+              <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:14px">
+                <div class="failmark"><svg class="ic" style="width:26px;height:26px" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+                <div style="font-size:17px;font-weight:600">会话已失效</div>
+                <span class="chip bad">24h 窗口已过期 · 过期于 18:07</span>
+              </div>
+              <div class="mcard" style="padding:8px 16px"><div class="kv">
+                <div class="row"><span class="k">原因</span><span class="v">24 小时窗口到期，自动续期未能完成</span></div>
+                <div class="row"><span class="k">判别</span><span class="v" style="font-size:11.5px;color:#93a7ae">本地 exp 已过 + 401 —— relay 的 401 不区分原因，App 自行推断</span></div>
+                <div class="row"><span class="k">影响面</span><span class="v">仅此机器 · 列表其他机器不受影响</span></div>
+              </div></div>
+              <div style="font-size:12px;color:#93a7ae;line-height:1.6">凭证有时限是两道门安全模型的一部分。到电脑上打开 dsh「设置 → 远程控制」刷新二维码，回来扫一下即可恢复。</div>
+              <div class="btnrow" style="flex-direction:column;gap:8px">
+                <span class="btn fill"><svg class="ic s" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>重新扫码</span>
+                <span class="btn danger">删除这台机器…</span>
+              </div>
+              <div class="foot-note">已配对 9 月 2 日 · 会话第 4 / 30 天 · <span class="mono">relay.example.com</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">I</span> <span class="t">会话失效页（三因判别）</span>
+          <ul><li>标题下的原因芯片按本地判别换文案：<b>24h 窗口已过期</b>（exp 已过）/ <b>被吊销</b>（exp 未到但 401）/ <b>达 30 天上限</b>（exp 未到 + 第 30 天）</li><li>失效只影响单台机器——列表里其他机器照常工作，此页明说</li><li>文案把"重扫"定位为安全设计的一部分，不是故障</li></ul>
+        </div>
+      </div>
+
+      <!-- J 配对失败 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">扫码配对</span></div>
+          <div class="p-body">
+            <div class="lockwrap" style="gap:16px;background:rgba(0,0,0,.18)">
+              <div class="mcard" style="width:100%;padding:22px 20px;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center">
+                <div class="warnmark"><svg class="ic" style="width:24px;height:24px" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></div>
+                <div style="font-size:15.5px;font-weight:600">二维码已失效</div>
+                <div style="font-size:12px;color:#93a7ae;line-height:1.6">机器端二维码已过期，或已被新生成的替换（每次生成会替换旧的）。请回到电脑端刷新后重试。</div>
+                <div class="btnrow" style="margin-top:8px">
+                  <span class="btn outline" style="flex:1">取消</span>
+                  <span class="btn fill" style="flex:1.4">重试扫码</span>
+                </div>
+              </div>
+              <div class="foot-note" style="margin:0">扫码后会先验证凭证（<span class="mono">GET /dsh-remote/session</span>）再存入安全存储</div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">J</span> <span class="t">配对失败 · 二维码过期/被替换</span>
+          <ul><li>扫码 → 组 Bearer → <b>先验证后入库</b>：首个请求 401 即走此页，不把死凭证写进 Keychain</li><li>"每次生成会替换旧的"与插件 QR 行为一致（懒生成/过期重铸）——文案直接解释原因</li></ul>
+        </div>
+      </div>
+
+      <!-- K 模型与思考等级 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">模型</span></div>
+          <div class="p-body">
+            <div class="sheetwrap">
+              <div class="sheet" style="gap:8px">
+                <div class="grab"></div>
+                <div class="sheet-title">模型与思考等级 · 本会话</div>
+                <div class="sect" style="margin:2px 0 -2px">DeepSeek</div>
+                <div class="mrow2 on">
+                  <div style="flex:1"><div class="nm">deepseek-chat</div><div class="ds">通用对话 · 128K · 支持思考档位</div></div>
+                  <svg class="ic s" viewBox="0 0 24 24" style="color:#34d399"><path d="M20 6 9 17l-5-5"/></svg>
+                </div>
+                <div class="mrow2">
+                  <div style="flex:1"><div class="nm">deepseek-reasoner</div><div class="ds">深度推理 · 128K · 支持思考档位</div></div>
+                </div>
+                <div class="sect" style="margin:4px 0 -2px">本地 vLLM</div>
+                <div class="mrow2">
+                  <div style="flex:1"><div class="nm">qwen3-32b</div><div class="ds">离线可用 · 32K · 仅 Off</div></div>
+                </div>
+                <div class="sect" style="margin:4px 0 -2px">思考等级 · deepseek-chat</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <span class="chip" style="padding:5px 11px">跟随默认</span>
+                  <span class="chip" style="padding:5px 11px">Off</span>
+                  <span class="chip" style="padding:5px 11px">Low</span>
+                  <span class="chip sel" style="padding:5px 11px">High ✓</span>
+                  <span class="chip" style="padding:5px 11px">Max</span>
+                </div>
+                <div style="font-size:10.5px;color:#93a7ae;line-height:1.55">档位与默认值由引擎按模型下发（reasoning.efforts / defaultEffort）——High 即该模型默认。选「跟随默认」= 不传档位，随引擎配置。</div>
+                <div style="font-size:10.5px;color:#93a7ae;line-height:1.55;border-top:1px solid var(--a-line);padding-top:8px">分组与条目 = <b>dsh 实际配置的 provider 与模型</b>（session/modelCatalog）。选择仅对当前会话生效；管理凭据/发现模型是特权操作，只能在本机 dsh 设置里做。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">K</span> <span class="t">模型与思考等级（会话级）</span>
+          <ul><li><b>按 provider 分组列出 dsh 配置的模型</b>——目录引擎下发，App 不写死任何清单；描述、上下文、是否支持档位都来自目录</li><li>思考档位 Off / Low / High / Max + 「跟随默认」，与 web 选择器同一词汇（引擎下发，非推理模型仅 Off）</li><li>顶栏芯片显示"模型 · 档位"（屏 E），两端选择互通</li></ul>
+        </div>
+      </div>
+
+      <!-- L 上下文分解 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">上下文</span></div>
+          <div class="p-body">
+            <div class="sheetwrap">
+              <div class="sheet">
+                <div class="grab"></div>
+                <div class="sheet-title">上下文占用 · 38%</div>
+                <div class="segbar">
+                  <i style="width:10.5%;background:#5c7a86"></i><i style="width:31.3%;background:#f5b74f"></i><i style="width:58.2%;background:#34d399"></i>
+                </div>
+                <div class="leg"><i style="background:#5c7a86"></i><span class="lb">系统提示</span><span class="vv">5.1K · 11%</span></div>
+                <div class="leg"><i style="background:#f5b74f"></i><span class="lb">工具定义</span><span class="vv">15.2K · 31%</span></div>
+                <div class="leg"><i style="background:#34d399"></i><span class="lb">对话</span><span class="vv">28.3K · 58%</span></div>
+                <div class="mcard" style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center">
+                  <span style="font-size:12px;color:#93a7ae">合计</span>
+                  <span class="mono" style="color:#e8edef">48.6K / 128K</span>
+                </div>
+                <div style="font-size:10.5px;color:#93a7ae;line-height:1.6">近似值（引擎启发式统计，与 web 端同一 contextBreakdown 投影）。占用超过 ~80% 时建议新开会话，或让引擎压缩历史后再继续。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">L</span> <span class="t">上下文分解（点击占用环展开）</span>
+          <ul><li>三段分解 system / tools / 对话——与 web ContextMeter 同一投影，数据一致</li><li>占用高时的动作建议（新会话/压缩）内联给出，不另设页面</li></ul>
+        </div>
+      </div>
+
+      <!-- M 会话列表 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">会话</span></div>
+          <div class="p-body">
+            <div class="appbar"><span class="iconbtn"><svg class="ic s" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></span><span class="t" style="font-size:16px">会话 · Mac mini</span><span class="sp"></span><span class="iconbtn" style="width:auto;padding:0 11px;gap:5px;font-size:11px"><svg class="ic xs" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新会话</span></div>
+            <div class="content">
+              <div class="sessrow on">
+                <div class="mrow"><span class="mname" style="font-size:13px">回测参数调整</span><span class="chip ok" style="font-family:'Outfit',sans-serif;font-size:10px">当前</span></div>
+                <div class="msub" style="margin:0">今天 14:02 · 4 轮 · deepseek-chat · 上下文 38%</div>
+              </div>
+              <div class="subrow">
+                <div class="mrow"><span class="dot g" style="width:7px;height:7px"></span><span class="mname" style="font-size:12px;color:#93a7ae">researcher · 子代理</span><span class="chip" style="font-size:9.5px">运行中</span></div>
+              </div>
+              <div class="subrow">
+                <div class="mrow"><span class="dot" style="width:7px;height:7px;background:#4a5a62"></span><span class="mname" style="font-size:12px;color:#93a7ae">reviewer · 子代理</span></div>
+              </div>
+              <div class="sessrow">
+                <div class="mrow"><span class="mname" style="font-size:13px">盘面复盘</span></div>
+                <div class="msub" style="margin:0">昨天 21:47 · 12 轮 · deepseek-reasoner</div>
+              </div>
+              <div class="sessrow">
+                <div class="mrow"><span class="mname" style="font-size:13px">策略库整理</span></div>
+                <div class="msub" style="margin:0">9 月 28 日 · 31 轮 · deepseek-chat</div>
+              </div>
+              <div class="foot-note" style="margin-top:4px">会话保存在引擎侧 · 点按恢复（与 web 端同一会话，两端接力）</div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">M</span> <span class="t">会话列表（每台机器独立）</span>
+          <ul><li>入口在控制台顶栏；行摘要 = 时间 + 轮次 + 模型 + 占用；<b>子代理会话缩进挂在父会话下</b>，状态点同语义</li><li>手机与 web 恢复<b>同一个</b>引擎侧会话——通勤路上接着电脑上的对话继续</li></ul>
+        </div>
+      </div>
+
+      <!-- N 子代理团队 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">团队</span></div>
+          <div class="p-body">
+            <div class="appbar"><span class="iconbtn"><svg class="ic s" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg></span><span class="t" style="font-size:16px">子代理团队</span><span class="sp"></span><span class="iconbtn"><svg class="ic s" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8M21 3v5h-5"/></svg></span></div>
+            <div class="content">
+              <div class="sect" style="margin:0">回测参数调整 · 运行中 2 / 共 3</div>
+              <div class="mcard">
+                <div class="mrow"><span class="dot g"></span><span class="mname" style="font-size:13px">researcher</span><span class="chip ok">运行中</span></div>
+                <div class="msub">研究 · 检索同窗口历史研报 · 3 分钟前活动</div>
+                <div class="mcard" style="margin-top:9px;background:rgba(255,255,255,.02);border-style:dashed;padding:9px 11px">
+                  <div class="lineage">researcher · 只读输出</div>
+                  <div style="font-size:11.5px;color:#93a7ae;line-height:1.55">已检索 6 篇研报（2026-03 ~ 2026-09）。90 天窗口波动率较 60 天上升 1.8 个百分点，结论已回传主会话。</div>
+                </div>
+              </div>
+              <div class="mcard">
+                <div class="mrow"><span class="dot g"></span><span class="mname" style="font-size:13px">coder</span><span class="chip ok">运行中</span></div>
+                <div class="msub">执行 · 跑批脚本改写 · 刚刚</div>
+              </div>
+              <div class="mcard" style="opacity:.72">
+                <div class="mrow"><span class="dot" style="background:#4a5a62"></span><span class="mname" style="font-size:13px">reviewer</span></div>
+                <div class="msub">审查 · 空闲 · 12 分钟前</div>
+              </div>
+              <div class="foot-note" style="margin-top:2px">子代理会话<b>只读</b>（对齐 web SubagentReadOnlyComposer）——指令只发给主会话；点开查看完整输出</div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">N</span> <span class="t">子代理团队（会话头徽标进入）</span>
+          <ul><li>对齐 web SubagentCatalogAction：目录 = kind + 运行状态（点同语义呼吸），可展开只读输出</li><li>消息 lineage（屏 E）与这里的完整输出互为索引：气泡看结论，团队页看过程</li></ul>
+        </div>
+      </div>
+
+      <!-- P 提问/选择 -->
+      <div class="unit">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">提问</span></div>
+          <div class="p-body">
+            <div class="sheetwrap">
+              <div class="sheet" style="gap:9px">
+                <div class="grab"></div>
+                <div class="sheet-title">agent 提问 · 2 个问题</div>
+                <div style="font-size:11.5px;color:#93a7ae">回答后批量提交（一次答完所有题）· 也可跳过单题</div>
+                <div class="sect" style="margin:2px 0 -3px">① 回测窗口用多少天？<span style="color:#5eead4;font-weight:400">单选</span></div>
+                <div class="mrow2 on"><div style="flex:1"><div class="nm" style="font-size:12.5px">90 天</div><div class="ds">与上一轮对齐，覆盖完整波动周期</div></div><svg class="ic s" viewBox="0 0 24 24" style="color:#34d399"><path d="M20 6 9 17l-5-5"/></svg></div>
+                <div class="mrow2"><div style="flex:1"><div class="nm" style="font-size:12.5px">60 天</div><div class="ds">更快出结果</div></div></div>
+                <div class="sect" style="margin:4px 0 -3px">② 额外包含哪些数据源？<span style="color:#f5b74f;font-weight:400">多选</span></div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <span class="chip sel" style="padding:5px 11px;font-family:'Outfit',sans-serif">研报 ✓</span>
+                  <span class="chip" style="padding:5px 11px;font-family:'Outfit',sans-serif">公告</span>
+                  <span class="chip sel" style="padding:5px 11px;font-family:'Outfit',sans-serif">龙虎榜 ✓</span>
+                </div>
+                <div style="font-size:10.5px;color:#93a7ae">无选项的问题显示为文本输入；每题可点"跳过"</div>
+                <div class="btnrow">
+                  <span class="btn outline" style="flex:1">跳过全部</span>
+                  <span class="btn fill" style="flex:1.6">提交回答</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">P</span> <span class="t">提问/选择（agent 让你选的时候）</span>
+          <ul><li>对齐 web QuestionComposer：挂起时<b>占住输入栏位置</b>（composer seat），答完归还——不是对话流内的卡片</li><li>结构照搬 AskUserQuestion：多问题批量答、单选/多选（multiSelect）、选项带描述、自由文本、可跳过</li><li><b>计划审批（plan-review）特化形态</b>：markdown 计划 + approve / decline（原样回传 label）+ 可编辑计划——编辑走"完整界面"逃生舱</li></ul>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ STATES ============ -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">03</span><h2>状态与异常的界面行为</h2></div>
+    <p class="sec-sub">会话过期不是意外，是这套安全模型的日常节律——从续期到失效，每个节点都有明确的界面应答，不让用户猜。</p>
+
+    <div style="background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px 24px">
+      <b style="font-size:14px">24 小时会话生命周期（倒计时芯片视角）</b>
+      <ol class="timeline">
+        <li><b>刚续期 · ~24h</b><p>芯片绿色/中性，显示剩余时间。App 后台也算得出 exp——<b>不联网就能预判过期</b>。</p></li>
+        <li class="warn"><b>剩 6h · 转琥珀</b><p>芯片变琥珀色提醒。此时离自动续期还有 4 小时，无需任何操作。</p></li>
+        <li><b>T-2h · 自动续期</b><p>调 <span class="mono">GET /dsh-remote/url-session</span> 换新 Bearer，芯片转圈。成功 → 回到 ~24h 绿态；失败 → 芯片转红「续期失败，请尽快重扫」，会话仍可用到当前 exp。</p></li>
+        <li class="bad"><b>0h · 全屏失效页（屏 I）</b><p>任何请求 401 或本地 exp 到点 → 该机器进入失效态：卡片变红内联"重新配对"，点入全屏页给出三因判别。<b>仅此机器失效，其他机器不受影响。</b></p></li>
+        <li><b>重扫即恢复</b><p>电脑端刷新二维码 → App 扫码 → 先验证后入库 → 回到 ~24h。30 天硬上限同理，只是二维码由"刷新"变为机器侧重新配对。</p></li>
+      </ol>
+    </div>
+
+    <div class="states" style="margin-top:14px">
+      <div class="state"><div class="tg r">401 · 三因判别</div><p>relay 的 401 响应体是通用文案（<span class="mono">remote session expired or missing</span>），<b>不区分原因</b>——App 本地判别：exp 已过 = <b>24h 窗口过期</b>；exp 未到但 401 = <b>被吊销</b>或<b>30 天上限</b>（结合本地记录的第 N/30 天给出可能原因）。失效页文案随之变化，并清除该机器凭证、停止其续期调度。</p></div>
+      <div class="state"><div class="tg y">WS 4001 · 被顶替</div><p>事件流被 <span class="mono">close(4001, device_replaced)</span> 掐断 → 顶部琥珀横幅「其他设备已配对，正在重连事件流…」，同一 Bearer 静默重连，恢复后横幅自动消失。<b>不弹窗、不清凭证</b>（HTTP 请求不受轮换影响）。</p></div>
+      <div class="state"><div class="tg g">T-2h · 自动续期</div><p>到期前 2 小时调 <span class="mono">GET /dsh-remote/url-session</span> 换新 Bearer。倒计时芯片转圈 → 成功后时间刷新为 ~24h；失败转红提示「续期失败，请尽快重扫」，会话仍可用到当前 exp。网络恢复后自动补试。</p></div>
+      <div class="state"><div class="tg y">配对验证失败</div><p>扫码后<b>先验证后入库</b>（屏 J）：首个 <span class="mono">GET /dsh-remote/session</span> 若 401，则二维码已过期或被替换——不写 Keychain，错误页指引回电脑端刷新。区分网络失败（重试即可）与 401（必须重扫）。</p></div>
+      <div class="state"><div class="tg r">吊销确认</div><p>「吊销全部配对」与「断开中继」均为二次确认对话框，文案写明后果：吊销 = <b>所有设备立即失效</b>（含当前手机）；断开 = 远程通道即刻不可用，需本机重连。</p></div>
+      <div class="state"><div class="tg y">审批请求 · 会话中</div><p>agent 请求敏感操作（shell / 文件写入等）→ 对话流内嵌<b>审批卡</b>（屏 E）：操作类型 + 参数等宽展示 + 允许 / 拒绝，选择经 <span class="mono">approval/request</span> 事件流即时回传引擎。远程场景下这是高频且高价值的交互——不在场就永远批不了。</p></div>
+      <div class="state"><div class="tg y">提问/选择 · 会话中</div><p>与审批<b>并列且独立</b>的第二类挂起交互（<span class="mono">question</span>）：agent 让你选——多问题批量作答、单选/多选、自由文本、可跳过（屏 P）；<b>plan-review 特化</b>= markdown 计划 + approve/decline 原样回传。挂起时占住 composer（输入栏变提问卡入口），审批同时挂起则两者并存、各自独立结算。前台提醒覆盖"agent 在等你回答"。</p></div>
+      <div class="state"><div class="tg g">浏览器逃生舱 · 插件与长尾界面</div><p>插件<b>管理面</b>（Plugins/Models/Agent-presets 面板）远程被 PRIVILEGED 闸死——web 自己都隐藏（REMOTE_HIDDEN_NAV_SECTIONS），App 不做原生入口。插件<b>运行面</b>页面（定时任务、远程控制卡等）走「在浏览器打开完整 Web 界面」（屏 D）：App 调 <span class="mono">GET /dsh-remote/url-session</span> 铸新链接 → 系统浏览器打开完整 SPA。⚠️ 着陆会触发 v3.204 轮换（顶替其他浏览器 cookie 会话；App 自身 Bearer 不受影响）——按钮下方文案明示。v1.5 可换内嵌 WebView 容器（同一铸链路）。</p></div>
+      <div class="state"><div class="tg y">中继不可达 ≠ 过期</div><p>超时 / DNS / TLS 失败一律标为「中继不可达」（琥珀，可重试），<b>绝不与 401 混淆</b>（红，需重扫）。证书指纹不匹配单独提示：证书已变更——确认非入侵后删除机器重新配对。</p></div>
+    </div>
+  </section>
+
+  <!-- ============ ERRORS ============ -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">04</span><h2>错误提示统一设计</h2></div>
+    <p class="sec-sub">错误是横切 14 屏的系统：同一套呈现层级、同一套文案模板、同一个错误对象模型——用户在任何屏遇到任何错误，语言和行为都一致。错误目录对着协议事实编写（401 通用响应体、relay 错误帧 engine_down / payload_too_large / concurrency_exceeded、429 限流、TOFU 指纹）。</p>
+
+    <div style="display:grid;grid-template-columns:1fr auto;gap:28px;align-items:start" class="errwrap">
+      <div>
+        <b style="font-size:14px">① 四层呈现体系（按"需要用户做什么"分层，不按技术来源）</b>
+        <div class="layer-grid">
+          <div class="layer"><div class="lv r">L1 · 全屏页</div><b class="nm">必须行动才能继续</b><p>会话失效（屏 I）、证书变更、存储不可用。红系。给出唯一主行动按钮。</p></div>
+          <div class="layer"><div class="lv y">L2 · 内联卡</div><b class="nm">上下文内就地处理</b><p>审批卡、任务失败卡（屏 F）、配对失败卡（屏 J）。嵌在相关内容旁，不打断全局。</p></div>
+          <div class="layer"><div class="lv y">L3 · 横幅</div><b class="nm">自动恢复 / 需要知道</b><p>中继不可达重试中、WS 4001 重连中、续期失败。琥珀系，恢复后自动消失，不打断操作。</p></div>
+          <div class="layer"><div class="lv g">L4 · SnackBar</div><b class="nm">短暂反馈与轻错误</b><p>操作成功（已吊销/已允许/已复制）、429 稍候重试、响应超限提示。数秒自消。</p></div>
+        </div>
+
+        <b style="font-size:14px;display:block;margin-top:22px">② 文案三段式（所有 L1/L2/L3 统一模板，zh/en 各一份资源键）</b>
+        <div class="rule-grid">
+          <div class="rule"><b>发生了什么（标题）</b>一句、具体、不甩锅。✅「会话已失效」❌「出错了 (1001)」。zh：会话已失效 / en：Session expired</div>
+          <div class="rule"><b>为什么（一行说明）</b>用户视角的原因或边界，错误码/参数放等宽字体。✅「24h 窗口已过期（18:07）」❌「invalid token payload」</div>
+          <div class="rule"><b>能做什么（行动）</b>恰好一个主行动；可自动处理的写明"正在自动重试（第 N 次）"。<b>绝不裸抛 JSON/stack/原始错误串。</b></div>
+        </div>
+
+        <b style="font-size:14px;display:block;margin-top:22px">③ 错误对象模型（App 内统一 ErrorCode，UI 只认它）</b>
+        <table class="err-table">
+          <tr><th>来源</th><th>code</th><th>呈现</th><th>色</th><th>重试</th><th>行动</th></tr>
+          <tr><td>网络</td><td class="mono">network.unreachable</td><td>L3 横幅</td><td class="y">琥珀</td><td>自动（指数退避）</td><td>等待；持续失败提示查网络/中继</td></tr>
+          <tr><td>TOFU</td><td class="mono">tls.cert_changed</td><td>L1 全屏</td><td class="r">红</td><td>无</td><td>确认非入侵 → 删除机器重新配对</td></tr>
+          <tr><td>闸门 401</td><td class="mono">auth.expired / .revoked / .max_age</td><td>L1 全屏（屏 I）</td><td class="r">红</td><td>无</td><td>重新扫码（本地三因判别）</td></tr>
+          <tr><td>闸门 429</td><td class="mono">ratelimit.hit</td><td>L4 Toast</td><td>中性</td><td>自动（退避）</td><td>无需操作</td></tr>
+          <tr><td>错误帧</td><td class="mono">engine_down</td><td>L3 横幅</td><td class="y">琥珀</td><td>手动按钮</td><td>机器端 dsh 可能退出——提示本机检查</td></tr>
+          <tr><td>错误帧</td><td class="mono">payload_too_large</td><td>L4 Toast</td><td>中性</td><td>手动</td><td>缩小范围/分页再取（32 MiB 上限）</td></tr>
+          <tr><td>错误帧</td><td class="mono">concurrency_exceeded</td><td>L4 Toast</td><td>中性</td><td>自动（排队）</td><td>大响应并发到 8，稍候</td></tr>
+          <tr><td>引擎 403</td><td class="mono">api.privileged</td><td>L2 内联（对话内）</td><td>中性</td><td>无</td><td>说明"特权方法仅本机可用"（屏 E）</td></tr>
+          <tr><td>WS</td><td class="mono">ws.device_replaced</td><td>L3 横幅</td><td class="y">琥珀</td><td>自动（同 Bearer 重连）</td><td>无需操作，恢复自消</td></tr>
+          <tr><td>本地</td><td class="mono">pair.qr_invalid</td><td>L2 卡（屏 J）</td><td class="y">琥珀</td><td>手动</td><td>回电脑端刷新二维码</td></tr>
+          <tr><td>本地</td><td class="mono">renew.failed</td><td>L3 横幅 + 芯片红</td><td class="r">红</td><td>自动补试</td><td>尽快重扫；会话仍可用到 exp</td></tr>
+          <tr><td>本地</td><td class="mono">storage.error</td><td>L1 全屏</td><td class="r">红</td><td>无</td><td>安全存储不可写——凭证未保存，指引重启/检查</td></tr>
+        </table>
+        <p style="font-size:12px;color:var(--muted);margin-top:10px">映射规则：HTTP 401 → auth.*（按本地 exp 判别细分）；429 → ratelimit；relay `error` 帧 → 按帧 code 直映射；TLS/超时/DNS → network.*（证书指纹不匹配特判 cert_changed）。未枚举的引擎错误 → L4 Toast + 原始消息等宽一行，不静默。全部错误入本地脱敏日志（token/psk 不落盘）。</p>
+
+        <b style="font-size:14px;display:block;margin-top:22px">④ 服务端错误契约——API 出码不出文案，UI 才出文案（relay 不做通用 i18n）</b>
+        <div class="rule-grid">
+          <div class="rule"><b>JSON 错误体（API 向）· 语言中立</b>relay 给稳定 machine code + 参数（429 已带 limit/windowSeconds，是正面先例），prose 仅供调试。<b>zh/en 文案只在 App 的 intl 资源里</b>——relay 不知道客户端语言，也不该知道。</div>
+          <div class="rule"><b>error 帧 · 已是契约形态</b>engine_down / payload_too_large / concurrency_exceeded 机器可读 code 齐全，App 直映射；message 等宽兜底。无需服务端改动。</div>
+          <div class="rule"><b>HTML 着陆卡 · 唯一双语点</b>4 张卡（二维码无效/会话失效/无权访问/已被顶替）是 relay 唯一直接给人看的界面 → en/zh 双语静态表，默认 en、Accept-Language: zh 出中文。App 所有请求带 Accept-Language（与本机语言一致）。</div>
+          <div class="rule"><b>401 加 code · v2 提案（向后兼容）</b>v1 靠 App 本地三因判别（够用）；v2 给 401 体追加 <span style="font-family:'JetBrains Mono',monospace;font-size:11px">code: session_expired | session_revoked | session_max_age | session_missing</span>（原字段不动），判别变权威、App 与 SPA 共同受益，本地判别降级为兜底。</div>
+        </div>
+      </div>
+
+      <!-- 示例屏 O -->
+      <div class="unit" style="min-width:300px;max-width:320px">
+        <div class="phone"><div class="island"></div>
+          <div class="p-status"><span>9:41</span><span class="r" style="color:#93a7ae">控制台</span></div>
+          <div class="p-body">
+            <div class="appbar" style="padding-bottom:6px;gap:6px">
+              <span class="chip ok" style="padding:6px 11px;font-size:11px;color:#34d399"><span class="dot g" style="width:7px;height:7px;margin-right:6px"></span>Mac mini ▾</span>
+              <span class="chip" style="padding:6px 11px;font-size:11px;font-family:'Outfit',sans-serif">deepseek-chat · High ▾</span>
+            </div>
+            <div style="padding:0 16px"><div class="seg"><span class="on">对话</span><span>任务</span><span>主机</span></div></div>
+            <div class="content">
+              <div class="banner">
+                <svg class="ic s" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+                中继不可达 · 正在自动重连（第 2 次）
+              </div>
+              <div class="bubble b-user">刚才的命令跑完了吗？</div>
+              <div class="bubble b-agent" style="color:#93a7ae;font-size:11.5px">（连接恢复后自动继续——已发出的消息不会丢失。）</div>
+              <div style="margin-top:auto"></div>
+              <div class="snackbar">
+                <svg class="ic s" viewBox="0 0 24 24" style="color:#34d399"><path d="M20 6 9 17l-5-5"/></svg>
+                已允许 · shell 命令继续执行
+                <span class="act">查看</span>
+              </div>
+              <div class="snackbar" style="opacity:.85">
+                <svg class="ic s" viewBox="0 0 24 24" style="color:#93a7ae"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+                响应超过 32 MiB 上限，已跳过大结果
+                <span class="act">重试</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="cap"><span class="idx">O</span> <span class="t">错误示例屏（L3 横幅 + L4 SnackBar 同屏）</span>
+          <ul><li>横幅=正在自动恢复的事（不打断输入）；SnackBar=轻反馈与轻错误（带行动词）</li><li>L1/L2 形态见屏 I（全屏失效）与屏 E/F/J（内联卡）——四层同屏各就各位</li></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>配套文档：<span class="mono" style="font-size:11px">docs/app-design.md</span>（架构与决策）· 本页为 UI 视觉设计 v1</span>
+    <span>实现：Flutter · Material 3 · 系统字体（mockup 以 Outfit / JetBrains Mono 代示）</span>
+  </footer>
+</div>
+</body>
+</html>

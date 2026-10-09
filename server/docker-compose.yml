@@ -1,0 +1,84 @@
+# v3.119 公网部署形态：relay + watchdog 同镜像、nginx TLS 前置（profile: tls）。
+#
+# 固定子网（172.28.0.0/24）是刻意的：RELAY_TRUST_PROXY 只信任 nginx 跳点
+# （172.28.0.10），X-Forwarded-For 之外的来源不参与 req.ip 计算——限流键
+# 与审计 IP 不可被客户端伪造。改 IP 必须同步改 .env 的 RELAY_TRUST_PROXY。
+#
+# 启动前：cp .env.example .env 并填 RELAY_PSK / RELAY_PUBLIC_HOST
+#（不填 relay 会 fail-closed 拒绝启动）。完整部署步骤（DNS/TLS/续期/排障）
+# 见 ../docs/deploy.md。
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      HOST: 0.0.0.0
+      RELAY_PSK: ${RELAY_PSK:?set RELAY_PSK in .env — the relay refuses the insecure default}
+      RELAY_PUBLIC_HOST: ${RELAY_PUBLIC_HOST:?set RELAY_PUBLIC_HOST in .env — must match dsh --trusted-host}
+      RELAY_TRUST_PROXY: ${RELAY_TRUST_PROXY:-172.28.0.10}
+      DSH_UPSTREAM: ${DSH_UPSTREAM:-http://host.docker.internal:3080}
+      RELAY_SESSION_GRACE_SEC: ${RELAY_SESSION_GRACE_SEC:-600}
+      RELAY_SESSION_MAX_AGE_SEC: ${RELAY_SESSION_MAX_AGE_SEC:-2592000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      relay-net:
+        ipv4_address: 172.28.0.5
+    volumes:
+      - relay-data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # 不直接对公网发布 8080：唯一入口是 nginx（或宿主机 nginx 做
+    # 127.0.0.1:8080:8080 端口映射）。直发 8080 会绕过 TLS 与 XFF 语义。
+
+  watchdog:
+    build: .
+    restart: unless-stopped
+    command: ["node", "dist/watchdog.js"]
+    environment:
+      AUDIT_DB_PATH: /app/data/relay-audit.db
+      WATCHDOG_HEALTH_URL: http://relay:8080/health
+      WATCHDOG_INTERVAL_SEC: ${WATCHDOG_INTERVAL_SEC:-300}
+      RELAY_ALERT_WEBHOOK_URL: ${RELAY_ALERT_WEBHOOK_URL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks:
+      relay-net:
+        ipv4_address: 172.28.0.6
+    volumes:
+      - relay-data:/app/data
+    depends_on:
+      relay:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    profiles: ["tls"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      RELAY_PUBLIC_HOST: ${RELAY_PUBLIC_HOST:?set RELAY_PUBLIC_HOST in .env}
+    volumes:
+      - ./deploy/nginx-relay.conf.template:/etc/nginx/templates/relay.conf.template:ro
+      - ./deploy/certs:/etc/nginx/certs:ro
+    networks:
+      relay-net:
+        ipv4_address: 172.28.0.10
+    depends_on:
+      relay:
+        condition: service_healthy
+
+networks:
+  relay-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  relay-data:

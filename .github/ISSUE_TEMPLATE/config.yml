@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/T0x7/dsh-remote-relay/security/advisories/new
+    about: Do NOT open a public issue for security problems — a public report puts the flaw in front of everyone who can reach your relay.
+  - name: Question / how do I set this up?
+    url: https://github.com/T0x7/dsh-remote-relay/discussions
+    about: Deployment and configuration questions are better as discussions than issues.

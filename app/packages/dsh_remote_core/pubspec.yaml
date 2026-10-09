@@ -1,0 +1,21 @@
+name: dsh_remote_core
+description: >-
+  UI-free core of the dsh-remote app: signed-URL credentials, Bearer session
+  assembly, relay/engine API clients and the session clock. Shapes are
+  hand-copied from docs/protocol.md and server/src and pinned by tests on
+  both sides (repo convention).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  # dart.dev official, zero transitive deps — the only way to get HMAC-SHA256
+  # in pure Dart without hand-rolling cryptography. Whitelist note recorded
+  # in app/PROGRESS.md (decision D-001).
+  crypto: ^3.0.0
+
+dev_dependencies:
+  lints: ^5.0.0
+  test: ^1.25.0

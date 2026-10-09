@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server-client:
+    name: server + client (build, test, e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm -r --filter '!dsh-remote-relay-plugin' build
+      - name: Unit tests
+        run: pnpm -r --filter '!dsh-remote-relay-plugin' test
+      - name: End-to-end smoke (real server + real client)
+        run: bash scripts/e2e-smoke.sh
+
+  plugin:
+    name: plugin (drift guard)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run plugin tests
+        # The host half imports @deepseek-ai/* peers that only exist inside a
+        # dsh installation, so the standalone typecheck (tsconfig.json) is
+        # not part of this job — see plugin/tsconfig.json for the full
+        # boundary. What IS verified here is the capability drift guard,
+        # which is pure and needs no dsh packages. A dsh-hosted typecheck
+        # runs in the dsh integration repository.
+        run: pnpm --filter dsh-remote-relay-plugin test
+
+  secrets:
+    name: no secrets or private hosts committed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, not just the tip: a real leak rode along in a commit
+          # message on this repository, and a tree-only scan cannot see it.
+          fetch-depth: 0
+      - name: Prove the guard still fails on a planted leak
+        # A guard nobody has watched fail is indistinguishable from one that
+        # does nothing. This was not hypothetical — the previous version of
+        # this job skipped '*.md' outright and passed a tree that contained a
+        # private hostname in the documentation.
+        run: bash scripts/scan-secrets.selftest.sh
+      - name: Scan tracked files and every commit message
+        run: bash scripts/scan-secrets.sh --history

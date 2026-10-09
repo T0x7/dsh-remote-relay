@@ -1,0 +1,64 @@
+# Local-test overlay — verify the host half inside a real dsh WITHOUT publishing
+# to npm and WITHOUT cloning from git.
+#
+# Why this file exists: installing the bundle for real (`dsh plugin add`) needs
+# the package on npm, because `dsh-remote-relay-plugin` depends on
+# `dsh-remote-relay-client` by name. Until you publish, this overlay mounts the
+# same rows straight from your checkout instead.
+#
+# The row's `name` is a RELATIVE PATH, which dsh resolves beside this file
+# (apps/cli/reference/README.md: "relative plugin names in inserted rows resolve
+# beside their patch file"). That is what turns this into a local test rather
+# than a registry install.
+#
+# Usage — compose without booting anything:
+#
+#   dsh --profile <name> --patch ~/Container/dsh-remote-relay/plugin/cordis.local-test.patch.yml --dump-config
+#
+# --dump-config prints the composed tree with comments naming the file that
+# supplied each row, so you can confirm the `dsh-remote` row landed and its
+# config parsed, before the engine ever starts.
+#
+# WHAT A GREEN --dump-config DOES AND DOES NOT PROVE (measured on dsh 0.1.7-rc.2):
+#   proves    the overlay parses as YAML (malformed YAML exits 1)
+#   proves    the relative `name` resolves beside this file — it shows up as
+#             file:///…/lib/index.js — and the row composes into the tree
+#   proves    your Config values pass the plugin's schema, once lib/index.js is
+#             the real build (schemastery validates the row, not the file)
+#   does NOT  prove the module exists or loads. A row pointing at
+#             ./lib/does-not-exist.js still exits 0. Only an actual boot
+#             surfaces "cannot find module" and a fiber ending FAILED.
+#
+# So treat --dump-config as the cheap config check, and the boot below as the
+# real one. Both are worth running: the first tells you your patch and config
+# are right, the second tells you the plugin actually mounts.
+#
+# Then boot for real (omit --dump-config):
+#
+#   dsh --profile <name> --patch ~/Container/dsh-remote-relay/plugin/cordis.local-test.patch.yml
+#
+# The boot is also what reveals a fiber that mounts and then ends FAILED — the
+# failure mode a unit test and a config dump are both blind to.
+#
+# REQUIRES `plugin/lib/index.js` to exist — run `pnpm verify` in the repo root
+# first (or at least `pnpm --filter dsh-remote-relay-plugin build:host`).
+#
+# SCOPE LIMIT — read this before you trust a green result: this overlay
+# exercises the HOST half only. The browser half (settings card, remote gating,
+# the pairing UI) is registered from the package manifest's `dsh.client.inject`
+# and materialises `exports['./client']` = `lib/client.js`. A path-based row has
+# no package manifest, so the browser half will NOT load through this overlay.
+# To test the browser half you need a real bundle install, which means the
+# `dsh-remote-relay-client` dependency must resolve — publish the client first,
+# or add this checkout into the profile's package.json with a `file:` specifier.
+
+- insert:
+    - id: dsh-remote
+      name: './lib/index.js'
+      config:
+        # Off by default: mounting the plugin must never dial a public relay
+        # just because someone loaded the overlay. Flip this on only when you
+        # have a relay you control.
+        enabled: false
+        relay_url: 'http://127.0.0.1:8080'
+        psk: 'dsh-remote-relay-default-insecure-psk'

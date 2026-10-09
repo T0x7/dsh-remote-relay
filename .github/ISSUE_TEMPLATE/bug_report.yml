@@ -1,0 +1,98 @@
+name: Bug report
+description: Something does not work as documented
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing this. Two things before you start:
+
+        - **Do not paste secrets.** No `RELAY_PSK`, no `engine.token`, no
+          certificate, no pairing URL, no real relay hostname. Replace hostnames
+          with `relay.example.com`.
+        - **If this is a security issue, do not file it here** — use the private
+          reporting channel described in `SECURITY.md`.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part broke?
+      options:
+        - server (relay)
+        - client (tunnel CLI)
+        - plugin (dsh settings card)
+        - app (Flutter)
+        - docs
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: >
+        dsh version (`dsh --version`), this repo's commit, Node, and — if you
+        touched the app — Flutter/Dart. Leave a field blank if not applicable.
+      placeholder: "dsh 0.1.7-rc.2 · commit abc1234 · Node 22 · Flutter 3.49"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: topology
+    attributes:
+      label: How is it deployed?
+      options:
+        - docker compose (TLS profile)
+        - docker compose (prod file, host nginx)
+        - bare node process
+        - not deployed yet
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead?
+      description: Include the error text verbatim, and redact hostnames/secrets.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands are more useful than prose here.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: >
+        Relay stdout, or — for the app — the diagnostics page (Settings →
+        Diagnostics). Again: redact hostnames and secrets.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this.
+          required: true
+        - label: I redacted the relay hostname, PSK, tokens, and pairing URLs.
+          required: true

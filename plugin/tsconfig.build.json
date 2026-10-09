@@ -1,0 +1,22 @@
+{
+  "$comment": [
+    "Emits the Host half: lib/index.js plus declarations under lib/types/.",
+    "The browser half is built separately by tsdown (see tsdown.config.ts) and",
+    "lands at lib/client.js — the path package.json exports['./client'] points",
+    "at, which the dsh client module system resolves and reads off disk.",
+    "",
+    "The client half is excluded here: it targets the browser, has no Node",
+    "entry, and is bundled by the tsdown config with the lazy-CJS factory",
+    "wrapper the client module system requires."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "outDir": "lib",
+    "declarationDir": "lib/types",
+    "rootDir": "src"
+  },
+  "include": ["src/index.ts", "src/remote-capability.ts"]
+}

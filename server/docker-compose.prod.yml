@@ -1,0 +1,64 @@
+# 生产部署形态（VPS）——与 docker-compose.yml 并存，不是替代品。
+#
+# 两份文件对应两种拓扑，用错会直接弄丢手机配对：
+#
+# |                        | docker-compose.yml      | 本文件                |
+# |------------------------|-------------------------|-----------------------|
+# | 用途                   | 从零自托管 / 开发        | 已有的 VPS             |
+# | TLS 终结               | 项目内的 nginx 服务      | **宿主机** nginx       |
+# | relay 网络             | bridge 172.28.0.0/24     | host 网络              |
+# | relay 监听             | 0.0.0.0:8080            | 127.0.0.1:18080       |
+# | 项目名                 | 目录名                   | dsh-remote-relay     |
+#
+# 事故记录（2026-10-04）：线上跑的就是这一套，而它只存在于服务器上、
+# 不在仓库里。在一台已经跑着 relay 的机器上直接执行仓库那份
+# `docker compose up -d --build` 会同时做两件坏事——项目名变了所以
+# `relay-data` 派生出一个**空卷**（全部配对消失），以及去抢
+# `0.0.0.0:8080`（那台机器上已被 headscale-ui 的 docker-proxy 占用）。
+#
+# ## name 为什么必须是 dsh-remote-relay
+#
+# 数据卷名由**项目名**派生（`dsh-remote-relay_relay-data`），与目录名无关。
+# 改这个 `name:` 等于换一个新卷，旧卷里的 relay 状态与手机配对全部读不到。
+# 目录改名是安全的，改这里不是。
+#
+# ## 首次部署
+#
+#     cp .env.example .env   # 填 RELAY_PSK / RELAY_PUBLIC_HOST
+#     docker compose -f docker-compose.prod.yml up -d --build
+#
+# 宿主机 nginx 需要把 TLS 终结后反代到 127.0.0.1:18080；见
+# ../docs/deploy.md 与 deploy/nginx-relay.conf.template。
+name: dsh-remote-relay
+
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    # host 网络：relay 只绑 127.0.0.1（见 .env 的 HOST/PORT），不直接对公网
+    # 暴露端口——TLS 与 X-Forwarded-For 的语义都由宿主机 nginx 那一跳负责。
+    network_mode: host
+    env_file: .env
+    volumes:
+      - relay-data:/app/data
+    healthcheck:
+      # 端口随 .env 的 PORT 走，改端口时这里要一起改。
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  watchdog:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    command: ["node", "dist/watchdog.js"]
+    env_file: .env
+    volumes:
+      - relay-data:/app/data
+
+volumes:
+  relay-data:
+    # 显式写死，不让 compose 从项目名派生：派生规则一改就是一次配对全丢。
+    name: dsh-remote-relay_relay-data

@@ -1,0 +1,57 @@
+{
+  "name": "dsh-remote-relay",
+  "version": "1.0.0",
+  "description": "Secure reverse proxy + WebSocket relay — reach a local dsh engine from anywhere without exposing its /api to the public internet",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/T0x7/dsh-remote-relay.git",
+    "directory": "server"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "relay",
+    "remote-control",
+    "websocket",
+    "proxy"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "Dockerfile",
+    "docker-compose.yml",
+    ".env.example",
+    "deploy",
+    "live-smoke.mjs"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "watchdog": "node dist/watchdog.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "live-smoke": "node live-smoke.mjs"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/http-proxy": "^11.6.0",
+    "@fastify/rate-limit": "^10.2.2",
+    "@fastify/websocket": "^11.0.2",
+    "fastify": "^5.2.1",
+    "pino": "^9.6.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "@types/ws": "^8.5.14",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.6"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

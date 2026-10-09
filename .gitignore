@@ -1,0 +1,46 @@
+node_modules/
+dist/
+*.tsbuildinfo
+server/data/
+client/data/
+# D-050: this was an unanchored `data/`, which matched `app/lib/data/` too —
+# so the whole App data layer (machine_entry / machines_repository / pin_store
+# / settings_store, ~284 lines) was never tracked. A fresh clone had no such
+# directory and the 15 files importing it failed to compile, which breaks the
+# design's "fork 即用" requirement. The two lines above are anchored for
+# exactly this reason; this one was not.
+/data/
+.env
+*.log
+
+# Plugin build output (lib/ holds the host half and the lazy-CJS browser half)
+plugin/lib/
+
+# Test fixtures generated at run time by the Loader smoke spec
+plugin/tests/fixtures/
+
+# Editor / tool scratch files
+.*.sw?
+*.tmp
+.DS_Store
+
+# Local scratch
+.wtest
+
+# E2E diagnostic scratch (not part of the product)
+.debug/
+
+# Isolated DSH_HOME for the sandboxed E2E engine (atomic-write needs rename
+# inside the workspace; ~/.dsh is rename-blocked by the sandbox)
+.dsh-e2e/
+
+# Workspace-local pnpm store (sandboxed shells can't rename into ~/Library;
+# pass --store-dir .pnpm-store when installing from a sandboxed agent)
+.pnpm-store/
+
+# Local pack output (scripts/pack-local.sh)
+dist-local/
+
+# VPS 私钥——绝不入库
+*.pem
+.ssh-host.pem
