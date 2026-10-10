@@ -131,7 +131,8 @@ plugin 的 15 个 skip 是**设计行为**——缺依赖时打印原因而非�
 ## 仍未完成
 
 - `npm publish`（三包，client 先）；README 目前走的是「从源码构建」路径，见 `client/README.md` / `plugin/README.md`
-- 公网 VPS relay 部署（`docs/deploy.md` 有完整手册：TLS 自签 + certbot standalone + 续期）
+- 公网 VPS relay 部署（`docs/deploy.md` 有完整手册：TLS 自签 + certbot standalone + 续期）。**当前 VPS 跑的是 10/5 旧构建**，协议已落后 v3.199 代际——重部署时顺手升级
+- 配对去重特性（同机器重配对不再翻倍卡片）：设计稿见 [`pairing-dedupe-design.md`](pairing-dedupe-design.md)
 - 首次推送后确认 GitHub 侧默认分支是 `master`（仓库建出来时设的是 `master`，与本仓一致，通常无需改动）
 
 > compose 项目名已从旧名改为 `dsh-remote-relay`（`server/docker-compose.prod.yml`）。
