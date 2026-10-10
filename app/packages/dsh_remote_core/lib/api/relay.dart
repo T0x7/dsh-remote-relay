@@ -28,21 +28,49 @@ enum TunnelState {
       };
 }
 
+/// End-to-end engine health as measured by the machine-side client
+/// (client `EngineHealth`, v3.177).
+///
+/// `connected` says the tunnel WS is up; this says whether the engine behind
+/// it actually answers. `unknown` means no evidence yet — it is not a fault
+/// and must not be painted as one. Absent on snapshots from older clients;
+/// parse falls back to [unknown].
+enum EngineHealth {
+  ok,
+  unreachable,
+  unknown;
+
+  static EngineHealth fromJson(String? v) => switch (v) {
+        'ok' => ok,
+        'unreachable' => unreachable,
+        _ => unknown,
+      };
+}
+
 /// `client.getConnectionState()` shape.
 class TunnelConnectionState {
-  const TunnelConnectionState(
-      {required this.state, required this.relayUrl, required this.manualOff});
+  const TunnelConnectionState({
+    required this.state,
+    required this.relayUrl,
+    required this.manualOff,
+    this.engine = EngineHealth.unknown,
+  });
 
   factory TunnelConnectionState.fromJson(Map<String, dynamic> j) =>
       TunnelConnectionState(
         state: TunnelState.fromJson(j['state'] as String?),
         relayUrl: (j['relayUrl'] as String?) ?? '',
         manualOff: (j['manualOff'] as bool?) ?? false,
+        engine: EngineHealth.fromJson(j['engine'] as String?),
       );
 
   final TunnelState state;
   final String relayUrl;
   final bool manualOff;
+
+  /// Machine-side verdict on the engine behind the tunnel. Meaningful only
+  /// when [state] is connected; treat as [EngineHealth.unknown] otherwise.
+  final EngineHealth engine;
 }
 
 /// One retained pairing, client `RemoteSessionInfo`.

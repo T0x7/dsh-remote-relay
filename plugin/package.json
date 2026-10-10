@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-relay-plugin",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "dsh framework plugin for remote control — owns the outbound PSK tunnel to a dsh-remote-relay server and contributes the pairing-QR settings card",
   "license": "MIT",
   "repository": {

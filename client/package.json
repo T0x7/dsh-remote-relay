@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-relay-client",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Client side of dsh-remote-relay — pairs a local dsh engine with a relay server over a PSK-authenticated outbound WebSocket tunnel",
   "license": "MIT",
   "repository": {

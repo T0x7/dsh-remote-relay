@@ -32,8 +32,39 @@ void main() {
         ],
       );
 
-  test('the 60s timer refreshes every machine that is not live', () async {
-    final store = storeOf(['s1', 's2']);
+  test('v3.177: the engine verdict rides along with the tunnel state', () async {
+    final store = storeOf(['s1']);
+    var served = snapshot(TunnelState.connected);
+    final poller = MachinesSessionPoller(
+      store: store,
+      fetch: (_) async => served,
+      timerFactory: (_, __) => _FakeTimer(const Duration(seconds: 60), (_) {}),
+    );
+    addTearDown(poller.dispose);
+    poller.start();
+
+    // A snapshot without a verdict must not manufacture one.
+    await poller.sweep();
+    expect(poller.stateOf('sess_s1'), TunnelState.connected);
+    expect(poller.engineHealthOf('sess_s1'), EngineHealth.unknown,
+        reason: 'old-client snapshot: absence of evidence is not a fault');
+
+    // A verdict flows through to the card seam.
+    served = RemoteSessionSnapshot(
+      tunnel: TunnelConnectionState(
+          state: TunnelState.connected,
+          relayUrl: '',
+          manualOff: false,
+          engine: EngineHealth.unreachable),
+      active: null,
+      sessions: const [],
+      devices: const [],
+    );
+    await poller.sweep();
+    expect(poller.engineHealthOf('sess_s1'), EngineHealth.unreachable);
+  });
+
+  test('the 60s timer refreshes every machine that is not live', () async {    final store = storeOf(['s1', 's2']);
     final asked = <String>[];
     final live = LiveMachineScope();
     live.claim('sess_s1'); // the console is driving this one — its data is live

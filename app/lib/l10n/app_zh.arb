@@ -11,6 +11,7 @@
   "machinesScanOrPaste": "扫码 / 粘贴链接",
   "cardExpiredHint": "会话已失效 · 点击重新配对",
   "cardSessionLine": "会话剩余 {left} · {day}/30 天",
+  "machinesEngineUnreachable": "隧道在线，但引擎没有应答 · 请检查电脑上的 dsh",
   "chipExpired": "已过期",
   "chipAutoRenew": "自动续期",
   "pairingTitle": "添加机器",
@@ -322,14 +323,35 @@
   "workspacesDeadBadge": "已失效",
   "workspacesDeadHint": "引擎里已没有这个会话：多为主机任务绕过引擎直写的记录，或记录被清理后的注册表残留。点「归档」可从列表清理。",
   "chatFoldExpand": "展开全文（{count} 字）",
+  "@chatFoldExpand": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "chatFoldCollapse": "收起",
   "chatMetaSystemReminder": "系统提醒",
   "chatMetaRuntimeContext": "运行时上下文",
   "chatMetaInjected": "系统注入",
   "chatMetaChip": "{label} · {count} 字",
+  "@chatMetaChip": {
+    "placeholders": {
+      "label": {"type": "String"},
+      "count": {"type": "int"}
+    }
+  },
   "chatThinkingActive": "💭 思考中…",
   "chatThoughtCollapsed": "💭 已思考 · {count} 字（点按展开）",
+  "@chatThoughtCollapsed": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "chatThoughtExpanded": "💭 已思考 · {count} 字（点按收起）",
+  "@chatThoughtExpanded": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
 "chatToolCallLabel": "工具调用",
   "chatToolArgs": "调用参数",
   "chatToolResult": "运行结果",
@@ -360,6 +382,12 @@
   "settingsDiagnosticsTitle": "诊断日志",
   "settingsDiagnosticsSub": "本地脱敏日志，仅存本机",
   "diagnosticsMeta": "{size} · 共 {lines} 行",
+  "@diagnosticsMeta": {
+    "placeholders": {
+      "size": { "type": "String" },
+      "lines": { "type": "String" }
+    }
+  },
   "diagnosticsEmpty": "暂无日志。",
   "diagnosticsCopied": "日志已复制",
   "diagnosticsShare": "分享日志",

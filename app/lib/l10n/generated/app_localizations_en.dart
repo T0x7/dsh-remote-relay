@@ -47,6 +47,10 @@ class L10nEn extends L10n {
   }
 
   @override
+  String get machinesEngineUnreachable =>
+      'Tunnel is up, but the engine is not answering · check dsh on your machine';
+
+  @override
   String get chipExpired => 'Expired';
 
   @override

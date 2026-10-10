@@ -13,6 +13,7 @@ void main() {
         'state': 'connected',
         'relayUrl': 'https://relay.example.com',
         'manualOff': false,
+        'engine': 'unreachable',
       },
       'active': {
         'sessionId': 'sess_abc',
@@ -51,6 +52,7 @@ void main() {
     });
     expect(snap.tunnel.state, TunnelState.connected);
     expect(snap.tunnel.relayUrl, 'https://relay.example.com');
+    expect(snap.tunnel.engine, EngineHealth.unreachable);
     expect(snap.active?.sessionId, 'sess_abc');
     expect(snap.active?.createdAt, 1779900000000);
     expect(snap.sessions, hasLength(1));
@@ -80,6 +82,31 @@ void main() {
     ]) {
       expect(TunnelState.fromJson(lit), expected);
     }
+  });
+
+  test('EngineHealth parses the v3.177 field; absent/junk → unknown', () {
+    expect(
+        TunnelConnectionState.fromJson({
+          'state': 'connected',
+          'engine': 'ok',
+        }).engine,
+        EngineHealth.ok);
+    expect(
+        TunnelConnectionState.fromJson({
+          'state': 'connected',
+          'engine': 'unreachable',
+        }).engine,
+        EngineHealth.unreachable);
+    // Old-client snapshot without the field must not read as a fault.
+    expect(
+        TunnelConnectionState.fromJson({'state': 'connected'}).engine,
+        EngineHealth.unknown);
+    expect(
+        TunnelConnectionState.fromJson({
+          'state': 'connected',
+          'engine': 'future-literal',
+        }).engine,
+        EngineHealth.unknown);
   });
 
   test('RevokeAllResult and UrlSessionMint parse', () {

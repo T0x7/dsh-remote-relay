@@ -46,6 +46,9 @@ class L10nZh extends L10n {
   }
 
   @override
+  String get machinesEngineUnreachable => '隧道在线，但引擎没有应答 · 请检查电脑上的 dsh';
+
+  @override
   String get chipExpired => '已过期';
 
   @override

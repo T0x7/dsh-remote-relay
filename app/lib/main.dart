@@ -343,6 +343,7 @@ class _MachinesPageState extends State<MachinesPage> {
                 itemBuilder: (_, i) => MachineCard(
                   entry: machines[i],
                   tunnel: _poller.stateOf(machines[i].id),
+                  engineHealth: _poller.engineHealthOf(machines[i].id),
                   onTap: () => _openMachine(machines[i]),
                   onRemove: () => _store.remove(machines[i].id),
                 ),
@@ -406,6 +407,7 @@ class MachineCard extends StatelessWidget {
     super.key,
     required this.entry,
     this.tunnel,
+    this.engineHealth,
     this.onTap,
     this.onRemove,
   });
@@ -430,9 +432,21 @@ class MachineCard extends StatelessWidget {
   /// A polled tunnel state outranks the clock, and the clock is what remains
   /// when no snapshot has landed yet (offline, first paint, 401) — an unknown
   /// state is not a fault and must not be painted as one.
-  static ChipStage dotStageOf({TunnelState? tunnel, required ChipStage clock}) =>
+  ///
+  /// v3.177: tunnel `connected` no longer paints green unconditionally. The
+  /// machine-side client's engine verdict outranks it: a tunnel can be up
+  /// while the engine behind it refuses every request (2026-10-10: engine
+  /// restart rotated its token, stale cookies 401'd every /api call, the card
+  /// stayed green the whole time). No verdict yet (unknown / old client) keeps
+  /// the old green — absence of evidence is not a fault.
+  static ChipStage dotStageOf({
+    TunnelState? tunnel,
+    EngineHealth? engine,
+    required ChipStage clock,
+  }) =>
       switch (tunnel) {
         null => clock,
+        TunnelState.connected when engine == EngineHealth.unreachable => ChipStage.warn,
         TunnelState.connected => ChipStage.neutral,
         TunnelState.connecting ||
         TunnelState.reconnecting ||
@@ -445,6 +459,9 @@ class MachineCard extends StatelessWidget {
 
   /// The relay's last reported tunnel state, or null when unknown.
   final TunnelState? tunnel;
+
+  /// The client's engine verdict from the same snapshot, or null when unknown.
+  final EngineHealth? engineHealth;
 
   final VoidCallback? onTap;
   final VoidCallback? onRemove;
@@ -462,7 +479,8 @@ class MachineCard extends StatelessWidget {
   /// The stage the dot actually paints. Read by the list test instead of
   /// pixel-diffing a circle.
   @visibleForTesting
-  ChipStage get dotStage => dotStageOf(tunnel: tunnel, clock: clockStage);
+  ChipStage get dotStage =>
+      dotStageOf(tunnel: tunnel, engine: engineHealth, clock: clockStage);
 
   @override
   Widget build(BuildContext context) {
@@ -538,6 +556,20 @@ class MachineCard extends StatelessWidget {
                       const TextStyle(fontSize: 11.5, color: AppTheme.inkDim),
                 ),
               ),
+              // v3.177 黄态提示：隧道在线但引擎不应答。只在有证据时出现
+              // （unreachable），unknown/旧客户端快照不渲染任何新东西——
+              // 健康态的卡片布局保持逐像素不变。
+              if (!expired &&
+                  tunnel == TunnelState.connected &&
+                  engineHealth == EngineHealth.unreachable) ...[
+                const SizedBox(height: AppTheme.xs),
+                Padding(
+                  padding: const EdgeInsets.only(left: AppTheme.minTouch - 26),
+                  child: Text(l10n.machinesEngineUnreachable,
+                      style: const TextStyle(
+                          fontSize: 11.5, color: AppTheme.warn)),
+                ),
+              ],
             ],
           ),
         ),

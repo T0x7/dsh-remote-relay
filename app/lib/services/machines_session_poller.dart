@@ -62,6 +62,15 @@ class MachinesSessionPoller {
   final ValueNotifier<Map<String, TunnelState>> tunnelStates =
       ValueNotifier(const {});
 
+  /// machineId → the client-side engine health from the same snapshot
+  /// (v3.177). Evidence-based only: [EngineHealth.unknown] until a snapshot
+  /// carries a verdict, and a missing entry is not a fault.
+  final ValueNotifier<Map<String, EngineHealth>> engineHealths =
+      ValueNotifier(const {});
+
+  /// The last known engine health for [machineId], or null.
+  EngineHealth? engineHealthOf(String machineId) => engineHealths.value[machineId];
+
   /// machineId → why the last read failed.
   final ValueNotifier<Map<String, String>> errors = ValueNotifier(const {});
 
@@ -110,6 +119,10 @@ class MachinesSessionPoller {
           continue;
         }
         tunnelStates.value = {...tunnelStates.value, entry.id: snapshot.tunnel.state};
+        engineHealths.value = {
+          ...engineHealths.value,
+          entry.id: snapshot.tunnel.engine,
+        };
         _clearError(entry.id);
         onSnapshot?.call(entry, snapshot);
       } on Object catch (e) {
@@ -133,6 +146,11 @@ class MachinesSessionPoller {
     final stale = states.keys.where((id) => !present.contains(id)).toList();
     if (stale.isNotEmpty) {
       tunnelStates.value = {...states}..removeWhere((id, _) => stale.contains(id));
+    }
+    final healths = engineHealths.value;
+    final staleHealths = healths.keys.where((id) => !present.contains(id)).toList();
+    if (staleHealths.isNotEmpty) {
+      engineHealths.value = {...healths}..removeWhere((id, _) => staleHealths.contains(id));
     }
     final failed = errors.value;
     final staleErrors = failed.keys.where((id) => !present.contains(id)).toList();
@@ -165,6 +183,7 @@ class MachinesSessionPoller {
     _disposed = true;
     stop();
     tunnelStates.dispose();
+    engineHealths.dispose();
     errors.dispose();
     inFlight.dispose();
   }

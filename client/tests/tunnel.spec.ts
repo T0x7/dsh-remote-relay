@@ -384,3 +384,144 @@ describe('RemoteTunnelClient pairing + tunnel plumbing', () => {
     }
   })
 })
+
+// ─── v3.177 引擎 cookie 注入 + 引擎健康 ───────────────────────────────────
+//
+// 事故（2026-10-10）：v3.176 的 `!includes('dsh-auth-')` 让引擎重启轮换
+// token 后，手机携带的陈旧 cookie 命中判断 → 跳过 mint → /api 全线 401。
+// 本组测试钉死两条语义：① 陈旧 dsh-auth-* 必须被剔除、新 cookie 无条件注入
+// （HTTP 与 WS 同一实现 applyEngineCookie）；② 引擎健康从真实响应推导。
+describe('engine cookie injection + health (v3.177)', () => {
+  let engine: import('node:http').Server | null = null
+  let client: RemoteTunnelClient | null = null
+
+  afterEach(async () => {
+    client?.disconnect()
+    client = null
+    await new Promise<void>((resolve) => {
+      if (!engine) return resolve()
+      engine.close(() => resolve())
+    })
+    engine = null
+  })
+
+  /// 起一个假引擎：/auth 按 scenario 应答，/api/* 按 apiStatus 应答。
+  function spinEngine(opts: {
+    auth: 'mint' | 'refuse'
+    apiStatus: number
+  }): Promise<number> {
+    return new Promise((resolve) => {
+      void import('node:http').then((http) => {
+        engine = http.createServer((req, res) => {
+          if (req.url?.startsWith('/auth')) {
+            if (opts.auth === 'mint') {
+              res.writeHead(303, {
+                'set-cookie': 'dsh-auth-FRESH=new-minted-value; Path=/; HttpOnly',
+              })
+              res.end()
+            } else {
+              res.writeHead(500, { 'content-length': 0 })
+              res.end()
+            }
+            return
+          }
+          res.writeHead(opts.apiStatus, { 'content-length': 0 })
+          res.end()
+        })
+        engine!.listen(0, '127.0.0.1', () => {
+          resolve((engine!.address() as { port: number }).port)
+        })
+      })
+    })
+  }
+
+  function makeClient(upstreamPort: number): RemoteTunnelClient {
+    return new RemoteTunnelClient(
+      {
+        enabled: false, // 不起真隧道，只打引擎侧
+        relayUrl: 'http://127.0.0.1:1',
+        psk: 'test-psk',
+        upstreamPort,
+        engineToken: 'current-engine-token',
+      },
+      { persist: false },
+    )
+  }
+
+  const apply = (c: RemoteTunnelClient, headers: Record<string, string>) =>
+    (c as unknown as {
+      applyEngineCookie(h: Record<string, string>, s: 'http' | 'ws'): Promise<void>
+    }).applyEngineCookie(headers, 'http')
+
+  it('回归：陈旧 dsh-auth-* 被剔除，fresh cookie 无条件注入（v3.176 includes 之死）', async () => {
+    const port = await spinEngine({ auth: 'mint', apiStatus: 200 })
+    client = makeClient(port)
+    const headers: Record<string, string> = {
+      cookie: 'dsh_remote_session=relay-side; dsh-auth-OLD=stale-signature; other=x',
+    }
+    await apply(client, headers)
+    expect(headers.cookie).toContain('dsh-auth-FRESH=new-minted-value')
+    expect(headers.cookie).not.toContain('dsh-auth-OLD')
+    expect(headers.cookie).toContain('dsh_remote_session=relay-side')
+    expect(headers.cookie).toContain('other=x')
+    // mint 成功即端到端证据
+    expect(client.getConnectionState().engine).toBe('ok')
+  })
+
+  it('无 cookie 的请求同样获得注入（URL 会话路线不变）', async () => {
+    const port = await spinEngine({ auth: 'mint', apiStatus: 200 })
+    client = makeClient(port)
+    const headers: Record<string, string> = {}
+    await apply(client, headers)
+    expect(headers.cookie).toBe('dsh-auth-FRESH=new-minted-value')
+  })
+
+  it('mint 失败 → 降级透传（无 dsh-auth）+ engine unreachable', async () => {
+    const port = await spinEngine({ auth: 'refuse', apiStatus: 200 })
+    client = makeClient(port)
+    const headers: Record<string, string> = { cookie: 'dsh-auth-OLD=stale' }
+    await apply(client, headers)
+    expect(headers.cookie).toBeUndefined() // 剔除后无其余项 → 不携带 cookie 头
+    expect(client.getConnectionState().engine).toBe('unreachable')
+  })
+
+  it('无 engineToken 的部署 mint 失败不算 unreachable（本来就没有凭据）', async () => {
+    const port = await spinEngine({ auth: 'refuse', apiStatus: 200 })
+    client = makeClient(port)
+    ;(client as unknown as { config: { engineToken?: string } }).config.engineToken = undefined
+    const headers: Record<string, string> = {}
+    await apply(client, headers)
+    expect(client.getConnectionState().engine).toBe('unknown')
+  })
+
+  it('/api 响应码回馈健康：200 → ok，401 → unreachable；非 /api 不参与', async () => {
+    const port = await spinEngine({ auth: 'refuse', apiStatus: 200 })
+    client = makeClient(port)
+    const self = client as unknown as {
+      engineHealth: 'ok' | 'unreachable' | 'unknown'
+      handleHttpReq(m: { id: string; method: string; path: string; headers: Record<string, string> }): Promise<void>
+      sendDataPlaneFrame(f: unknown): void
+    }
+    self.engineHealth = 'unknown'
+    // handleHttpReq 会经 sendDataPlaneFrame 回发响应帧：隧道未连时帧被丢弃
+    // 也无妨——这里只关心 upstream 状态码对 engineHealth 的副作用。
+    self.sendDataPlaneFrame = () => {}
+    // handleHttpReq 在响应结束前就返回（逐块收集是回调式的），健康回馈
+    // 落在 res 'end' ——给事件循环一拍再断言。
+    const settle = () => new Promise((r) => setTimeout(r, 60))
+    await self.handleHttpReq({ id: 'x1', method: 'GET', path: '/api/session/list', headers: {} })
+    await settle()
+    expect(self.engineHealth).toBe('ok')
+
+    const port2 = await spinEngine({ auth: 'refuse', apiStatus: 401 })
+    ;(client as unknown as { config: { upstreamPort: number } }).config.upstreamPort = port2
+    await self.handleHttpReq({ id: 'x2', method: 'GET', path: '/api/session/list', headers: {} })
+    await settle()
+    expect(self.engineHealth).toBe('unreachable')
+
+    // 非 /api 的 401 与引擎健康无关（插件自有路由不过引擎认证）
+    await self.handleHttpReq({ id: 'x3', method: 'GET', path: '/dsh-remote/session', headers: {} })
+    await settle()
+    expect(self.engineHealth).toBe('unreachable')
+  })
+})

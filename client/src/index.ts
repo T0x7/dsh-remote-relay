@@ -16,6 +16,7 @@ export type {
   RemoteSessionInfo,
   RemoteDeviceInfo,
   TunnelState,
+  EngineHealth,
 } from './tunnel.ts';
 export {
   PRIVILEGED_METHODS_MIRROR,

@@ -11,6 +11,7 @@
   "machinesScanOrPaste": "Scan / paste link",
   "cardExpiredHint": "Session expired · tap to re-pair",
   "cardSessionLine": "{left} left · day {day}/30",
+  "machinesEngineUnreachable": "Tunnel is up, but the engine is not answering · check dsh on your machine",
   "chipExpired": "Expired",
   "chipAutoRenew": "Auto-renew",
   "pairingTitle": "Add machine",

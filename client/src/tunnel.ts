@@ -55,6 +55,18 @@ export interface RemoteSessionInfo {
 /** Tunnel-level connection state surfaced on the settings card. */
 export type TunnelState = 'connected' | 'connecting' | 'reconnecting' | 'disabled' | 'manual-off';
 
+/**
+ * End-to-end engine health as seen from the data plane (v3.177).
+ *
+ * 'connected' only means the tunnel WS to the relay is up — it says nothing
+ * about whether the engine behind it actually answers. This flag carries that
+ * missing fact, observed for free at two points the client already touches:
+ * the /auth cookie mint (per fresh mint, ~never — 25-day cache) and proxied
+ * /api responses (every console request). unknown means no evidence yet and
+ * must not be painted as a fault.
+ */
+export type EngineHealth = 'ok' | 'unreachable' | 'unknown';
+
 /** Relay-side absolute pairing lifetime cap (30 days) — drop older rows on load. */
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -179,6 +191,8 @@ export class RemoteTunnelClient {
   private isManualClosed = false;
   private reconnectDelayMs: number;
   private tunnelState: TunnelState = 'disabled';
+  /** v3.177 数据面实测的引擎健康（见 EngineHealth 注释）。进程内状态，不落盘。 */
+  private engineHealth: EngineHealth = 'unknown';
   /** 用户手动断联（区别于网络掉线）：断开期间 close 不触发重连，直到
    * 手动重连或引擎重启（config.enabled 仍为 true）。 */
   private manualOff = false;
@@ -477,7 +491,7 @@ export class RemoteTunnelClient {
   }
 
   /** Tunnel-level state for the settings card status line. */
-  public getConnectionState(): { state: TunnelState; relayUrl: string; manualOff: boolean } {
+  public getConnectionState(): { state: TunnelState; relayUrl: string; manualOff: boolean; engine: EngineHealth } {
     if (this.manualOff) {
       this.tunnelState = 'manual-off';
     } else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -487,7 +501,7 @@ export class RemoteTunnelClient {
     } else if (this.tunnelState !== 'reconnecting') {
       this.tunnelState = 'connecting'
     }
-    return { state: this.tunnelState, relayUrl: this.config.relayUrl, manualOff: this.manualOff }
+    return { state: this.tunnelState, relayUrl: this.config.relayUrl, manualOff: this.manualOff, engine: this.engineHealth }
   }
 
   /** Revoke a single pairing (v3.170 多 pairing 共存后的细粒度撤销).
@@ -683,17 +697,11 @@ export class RemoteTunnelClient {
       return
     }
     const upstreamHeaders = this.buildUpstreamHeadersInline(msg.headers, this.resolvePublicHost(), this.resolveEngineToken())
-    // v3.176:URL 会话路线的浏览器没走 /auth 着陆,不带 dsh-auth 引擎 cookie,
-    // dsh BrowserAuth 会 401 'unauthorized'。与 v3.157 WS 桥同款修法:plugin
-    // 自己用 X-App-Token 向 /auth mint 一枚注入(25 天缓存,几乎零开销)。
-    // cookie 路线浏览器自带 dsh-auth,includes 判断跳过,行为不变。
-    {
-      const cookieStr = String(upstreamHeaders.cookie ?? '')
-      if (!cookieStr.includes('dsh-auth-')) {
-        const minted = await this.mintEngineCookie()
-        if (minted) upstreamHeaders.cookie = cookieStr ? `${cookieStr}; ${minted}` : minted
-      }
-    }
+    // v3.177:与 WS 桥共用同一注入语义（总是剔除陈旧 dsh-auth-* + 无条件
+    // 重签）。v3.176 的 `!includes('dsh-auth-')` 判断是这起 401 事故的根因：
+    // 引擎重启轮换 token 后，手机带着旧签名 cookie，includes 命中 → 跳过
+    // mint → 401 死循环。
+    await this.applyEngineCookie(upstreamHeaders, 'http')
     const req = http.request({
       hostname: this.resolveUpstreamHost(),
       port: this.resolveUpstreamPort(),
@@ -745,6 +753,17 @@ export class RemoteTunnelClient {
       res.on('end', () => {
         releaseLargeSlot()
         if (overflow) return
+        // v3.177:/api 响应码就是免费的端到端健康探针——2xx 证明「隧道+引擎
+        // 认证」全链路通，401 证明引擎认证面在拒（fresh cookie 仍 401 只可
+        // 能是 token 失配/引擎半死）。只看 /api/*：插件自有路由不过引擎认证，
+        // 它们的 200/401 与引擎健康无关。
+        if (msg.path.startsWith('/api/')) {
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            this.engineHealth = 'ok'
+          } else if (res.statusCode === 401) {
+            this.engineHealth = 'unreachable'
+          }
+        }
         const headers: Record<string, string> = {}
         for (const [k, v] of Object.entries(res.headers)) {
           const lk = k.toLowerCase()
@@ -784,6 +803,34 @@ export class RemoteTunnelClient {
   // 时 plugin 自己向 /auth 用 X-App-Token 换一枚注入（进程内缓存 25 天）。
   private engineCookieCache: { value: string; expiresAt: number } | null = null
 
+  /**
+   * v3.177：HTTP 数据面与 WS 桥共用的引擎 cookie 注入——两处必须同一语义，
+   * 各写各的已经出过一次事故（v3.176 把 v3.157.1 的「总是替换」抄成
+   * 「没有才加」：引擎重启轮换 token 后，浏览器携带的陈旧 dsh-auth-* 命中
+   * includes 判断 → 跳过 mint → 死 cookie 透传 → /api 全线 401，而
+   * /dsh-remote/* 不过引擎认证，机器卡照常绿灯。2026-10-10 实证）。
+   *
+   * 语义：先剔除全部旧 dsh-auth-*（引擎 token 轮换后旧签名必失效，保留
+   * 没有意义），再用本进程持有的当前 token 无条件 mint 一枚注入。mint 失败
+   * 时按降级透传（不带 dsh-auth），并把 engineHealth 标为 unreachable——
+   * 这就是「隧道在线但引擎不应答」黄态的信号源之一。
+   */
+  private async applyEngineCookie(headers: Record<string, string>, surface: 'http' | 'ws'): Promise<void> {
+    const kept = String(headers.cookie ?? '')
+      .split(';').map(c => c.trim()).filter(c => c !== '' && !c.startsWith('dsh-auth-')).join('; ')
+    if (kept) {
+      headers.cookie = kept
+    } else {
+      delete headers.cookie
+    }
+    const minted = await this.mintEngineCookie()
+    if (minted) {
+      headers.cookie = kept ? `${kept}; ${minted}` : minted
+    } else if (this.resolveEngineToken()) {
+      console.warn(`[dsh-remote-client] ${surface} bridge: engine cookie mint failed, relaying without dsh-auth`)
+    }
+  }
+
   private async mintEngineCookie(): Promise<string | null> {
     const http = await import('node:http')
     const now = Date.now()
@@ -808,32 +855,34 @@ export class RemoteTunnelClient {
           const pair = first?.split(';')[0]
           if (res.statusCode === 303 && pair && pair.includes('=')) {
             this.engineCookieCache = { value: pair, expiresAt: now + 25 * 24 * 60 * 60 * 1000 }
+            this.engineHealth = 'ok'
             resolve(pair)
           } else {
+            // 有 token 却签不出（非 303）＝引擎认证面不应答。缓存清掉，
+            // 下一个请求会重试而不是吃 25 天的旧命中。
+            this.engineCookieCache = null
+            this.engineHealth = 'unreachable'
             resolve(null)
           }
         })
-        res.on('error', () => resolve(null))
+        res.on('error', () => {
+          this.engineHealth = 'unreachable'
+          resolve(null)
+        })
       })
-      req.on('error', () => resolve(null))
+      req.on('error', () => {
+        this.engineHealth = 'unreachable'
+        resolve(null)
+      })
       req.end()
     })
   }
 
   private async handleWsUpgrade(msg: { id: string; path: string; headers: Record<string, string> }): Promise<void> {
     const upstreamHeaders = this.buildUpstreamHeadersInline(msg.headers, this.resolvePublicHost(), this.resolveEngineToken())
-    // v3.157.1：不判断「有没有」而是「总是替换」——浏览器可能存着引擎
-    // 重启前 mint 的旧 dsh-auth（engine.token 轮换后签名失效），includes
-    // 判断会跳过 mint 把陈旧 cookie 透传给 mux（401）。剔除全部旧 dsh-auth
-    // 项后注入本进程 mint 的新值；mint 失败则原样透传（降级）。
-    const cookie = String(upstreamHeaders.cookie ?? '')
-      .split(';').map(c => c.trim()).filter(c => c !== '' && !c.startsWith('dsh-auth-')).join('; ')
-    const minted = await this.mintEngineCookie()
-    if (minted) {
-      upstreamHeaders.cookie = cookie ? `${cookie}; ${minted}` : minted
-    } else if (cookie) {
-      console.warn('[dsh-remote-client] ws bridge: engine cookie mint failed, relaying without dsh-auth')
-    }
+    // v3.177:改用与 HTTP 数据面共用的 applyEngineCookie——语义不变（本处
+    // v3.157.1 起就是「总是替换」），只是收敛到一个实现，防止再次各写各的。
+    await this.applyEngineCookie(upstreamHeaders, 'ws')
     // v3.160：插件自有的实时行情 WS 在公网浏览器没有 Electron
     // contextBridge，SPA 只能发占位 token——转发时改写 query token 为本进程
     // 的 DSH_BIND_TOKEN（同 cookie bootstrap 信任模型：relay 的

@@ -17,9 +17,11 @@ import 'factories.dart';
 /// on a card reads that real tunnel state, so "机器离线（隧道断）时屏 A 仍显示
 /// 绿灯" cannot happen again.
 void main() {
-  RemoteSessionSnapshot snapshot(TunnelState state) => RemoteSessionSnapshot(
-        tunnel:
-            TunnelConnectionState(state: state, relayUrl: '', manualOff: false),
+  RemoteSessionSnapshot snapshot(TunnelState state,
+          [EngineHealth engine = EngineHealth.unknown]) =>
+      RemoteSessionSnapshot(
+        tunnel: TunnelConnectionState(
+            state: state, relayUrl: '', manualOff: false, engine: engine),
         active: null,
         sessions: const [],
         devices: const [],
@@ -203,6 +205,61 @@ void main() {
       ChipStage.danger,
       reason: 'no snapshot yet → the clock still says something',
     );
+  });
+
+  test('v3.177: a connected tunnel with an unreachable engine warns', () {
+    expect(
+      MachineCard.dotStageOf(
+          tunnel: TunnelState.connected,
+          engine: EngineHealth.unreachable,
+          clock: ChipStage.warn),
+      ChipStage.warn,
+      reason: '2026-10-10：引擎重启轮换 token 后隧道照常绿灯、/api 全线 401'
+          '——绿灯必须让位给实测的引擎不可达',
+    );
+    expect(
+      MachineCard.dotStageOf(
+          tunnel: TunnelState.connected, engine: EngineHealth.ok, clock: ChipStage.warn),
+      ChipStage.neutral,
+    );
+    // 没有证据（unknown / 旧客户端快照缺字段）不构成故障，保持绿灯。
+    expect(
+      MachineCard.dotStageOf(
+          tunnel: TunnelState.connected, engine: EngineHealth.unknown, clock: ChipStage.warn),
+      ChipStage.neutral,
+    );
+    expect(
+      MachineCard.dotStageOf(tunnel: TunnelState.connected, engine: null, clock: ChipStage.warn),
+      ChipStage.neutral,
+    );
+  });
+
+  testWidgets('the engine-unreachable hint renders only with evidence',
+      (tester) async {
+    final store = MachinesStore(
+      repo: InMemoryMachinesRepository(),
+      seed: [machineFrom(mintTestUrl(sessionId: 'sess_s1', name: 'mac-mini'))],
+    );
+    var served = snapshot(TunnelState.connected, EngineHealth.unknown);
+    await tester.pumpWidget(host(MachinesPage(
+      store: store,
+      pollInterval: Duration.zero,
+      snapshotFetch: (_) async => served,
+    )));
+    await _pull(tester);
+    expect(find.textContaining('引擎没有应答'), findsNothing,
+        reason: 'unknown 不是故障，健康态卡片布局必须逐像素不变');
+
+    served = snapshot(TunnelState.connected, EngineHealth.unreachable);
+    await _pull(tester);
+    expect(find.textContaining('引擎没有应答'), findsOneWidget,
+        reason: '黄态出现时必须告诉用户该检查什么（而不是引导重配对）');
+
+    served = snapshot(TunnelState.reconnecting, EngineHealth.unreachable);
+    await _pull(tester);
+    await tester.pump();
+    expect(find.textContaining('引擎没有应答'), findsNothing,
+        reason: '隧道都断了，这句引擎提示没有意义——红态有自己的文案');
   });
 }
 

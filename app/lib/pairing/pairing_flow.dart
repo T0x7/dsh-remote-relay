@@ -118,7 +118,10 @@ class _PairingFlowSheetState extends State<PairingFlowSheet> {
     if (!mounted) return;
     switch (result) {
       case PairingVerifyResult.valid:
-        final entry = buildPairedEntry(params, await _pinFor(params));
+        final pin = await _pinFor(params);
+        // `_pinFor` 是第二个 async gap——跨它使用 context 需要再守一次。
+        if (!mounted) return;
+        final entry = buildPairedEntry(params, pin);
         widget.onPaired(entry);
         Navigator.of(context).pop();
       case PairingVerifyResult.invalid:

@@ -163,6 +163,12 @@ abstract class L10n {
   /// **'{left} left · day {day}/30'**
   String cardSessionLine(Object day, Object left);
 
+  /// No description provided for @machinesEngineUnreachable.
+  ///
+  /// In en, this message translates to:
+  /// **'Tunnel is up, but the engine is not answering · check dsh on your machine'**
+  String get machinesEngineUnreachable;
+
   /// No description provided for @chipExpired.
   ///
   /// In en, this message translates to:
