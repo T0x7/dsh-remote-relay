@@ -38,7 +38,7 @@ void main() {
     final poller = MachinesSessionPoller(
       store: store,
       fetch: (_) async => served,
-      timerFactory: (_, __) => _FakeTimer(const Duration(seconds: 60), (_) {}),
+      timerFactory: (_, _) => _FakeTimer(const Duration(seconds: 60), (_) {}),
     );
     addTearDown(poller.dispose);
     poller.start();

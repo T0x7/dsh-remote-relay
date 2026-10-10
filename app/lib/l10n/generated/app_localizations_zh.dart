@@ -1035,6 +1035,16 @@ class L10nZh extends L10n {
   String get chatThinkingActive => '💭 思考中…';
 
   @override
+  String chatThinkingActiveCount(int count) {
+    return '💭 思考中 · $count 字';
+  }
+
+  @override
+  String chatThinkingActiveExpanded(int count) {
+    return '💭 思考中 · $count 字（点按收起）';
+  }
+
+  @override
   String chatThoughtCollapsed(int count) {
     return '💭 已思考 · $count 字（点按展开）';
   }

@@ -154,7 +154,7 @@ void main() {
         reason: '注入不走长度折叠——收就收成一行');
   });
 
-  testWidgets('流式思考：先实时可见，回答一到自动收起', (tester) async {
+  testWidgets('流式思考：默认收成带字数的 pill，回答一到收成「已思考」', (tester) async {
     final (:gateway, :controller) = await _openConsole(tester);
 
     controller.applyFrame(_frame({
@@ -175,9 +175,10 @@ void main() {
       'chunk': {'type': 'reasoning-delta', 'text': '推演之中' * 30},
     }));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.textContaining('思考'), findsOneWidget,
-        reason: '思考先于答案实时可见');
-    expect(find.textContaining('推演之中'), findsOneWidget);
+    expect(find.textContaining('思考中 · 120 字'), findsOneWidget,
+        reason: 'D-087：思考中只显示 pill，实时字数证明模型活着');
+    expect(find.textContaining('推演之中'), findsNothing,
+        reason: '正文默认不上屏——点开 pill 才看实时流');
 
     controller.applyFrame(_frame({
       'type': 'chunk',

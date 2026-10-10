@@ -340,6 +340,18 @@
     }
   },
   "chatThinkingActive": "💭 Thinking…",
+  "chatThinkingActiveCount": "💭 Thinking · {count} chars",
+  "@chatThinkingActiveCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "chatThinkingActiveExpanded": "💭 Thinking · {count} chars (tap to collapse)",
+  "@chatThinkingActiveExpanded": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "chatThoughtCollapsed": "💭 Thought · {count} chars (tap to expand)",
   "@chatThoughtCollapsed": {
     "placeholders": {

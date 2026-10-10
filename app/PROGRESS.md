@@ -813,3 +813,21 @@
 - **日志系统会反哺定位**。D-083 是在诊断日志里那条孤零零的
   `first-frame deadline hit (45s)` 上开始的——没有 app.log，这个 bug 只会停在
   「用户说会话打不开」这种无法收敛的描述上。D-077 当天入库是对的。
+
+## 2026-10-10（晚）D-087：流式思考默认收起——移动端惯例改版
+
+- **决策**：D-069 的「思考先于答案实时展开」对齐的是桌面端（Cherry Studio）；
+  本 App 是手机，对齐 Claude / ChatGPT 移动端惯例——思考中默认只显示
+  pill「💭 思考中 · N 字」（字数实时增长证明活着），点开看实时流、再点收起，
+  正文到达照旧收成「已思考 · N 字」。Thomas 提出并拍板。
+- **顺带修掉一个现存小疣**：`showBody = active || open` 让思考流期间用户
+  钉住的「收起」失效（被 active 强制展开）。改为 `open`，钉住真正全权。
+- **测试**：新增 `chat_thinking_test.dart` 四条（默认收起 / 点开看实时流 /
+  自动收成已思考 / 钉住保持展开）；`chat_meta_and_thinking_test` 与
+  `chat_typing_indicator_test` 两条旧行为断言改写为新预期。
+- **测试基建经验**：流式 token 的重绘按 `_streamPaintInterval`（48ms）合并
+  （D-034），widget 测试里推 delta 后必须 `pump(60ms)` 越过窗口，否则 UI
+  永远不重建（controller 状态是对的，屏幕是旧的——用「打印 controller 状态
+  vs 打印屏幕 Text」两层对比定位）。
+- **golden**：`machines_list` 又是 0.18%/7764px，与 10-07/10-10 早记录逐位
+  一致、本改动未触及 machines 页——已知漂移，非回归。

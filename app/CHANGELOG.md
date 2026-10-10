@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Streaming thoughts default to collapsed (D-087)** — while the model is
+  thinking, the block now renders as a compact pill「💭 思考中 · N 字」with a
+  live character count instead of streaming the full reasoning onto the
+  screen (mobile convention, aligned with the Claude / ChatGPT apps). Tap the
+  pill to watch the live stream; tap again to collapse. When the answer text
+  starts arriving the block auto-collapses to「💭 已思考 · N 字」as before,
+  and a manual toggle still pins the state. Also fixes a latent wart where a
+  pinned-collapsed block was force-expanded during streaming
+  (`showBody = active || open` → `open`).
+
 ### Added
 
 - **Logging system (D-077)** — app-wide `AppLog` facade with a sanitized

@@ -1097,6 +1097,16 @@ class L10nEn extends L10n {
   String get chatThinkingActive => '💭 Thinking…';
 
   @override
+  String chatThinkingActiveCount(int count) {
+    return '💭 Thinking · $count chars';
+  }
+
+  @override
+  String chatThinkingActiveExpanded(int count) {
+    return '💭 Thinking · $count chars (tap to collapse)';
+  }
+
+  @override
   String chatThoughtCollapsed(int count) {
     return '💭 Thought · $count chars (tap to expand)';
   }

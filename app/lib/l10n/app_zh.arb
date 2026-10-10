@@ -340,6 +340,18 @@
     }
   },
   "chatThinkingActive": "💭 思考中…",
+  "chatThinkingActiveCount": "💭 思考中 · {count} 字",
+  "@chatThinkingActiveCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "chatThinkingActiveExpanded": "💭 思考中 · {count} 字（点按收起）",
+  "@chatThinkingActiveExpanded": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
   "chatThoughtCollapsed": "💭 已思考 · {count} 字（点按展开）",
   "@chatThoughtCollapsed": {
     "placeholders": {

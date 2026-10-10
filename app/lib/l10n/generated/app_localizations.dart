@@ -1999,6 +1999,18 @@ abstract class L10n {
   /// **'💭 Thinking…'**
   String get chatThinkingActive;
 
+  /// No description provided for @chatThinkingActiveCount.
+  ///
+  /// In en, this message translates to:
+  /// **'💭 Thinking · {count} chars'**
+  String chatThinkingActiveCount(int count);
+
+  /// No description provided for @chatThinkingActiveExpanded.
+  ///
+  /// In en, this message translates to:
+  /// **'💭 Thinking · {count} chars (tap to collapse)'**
+  String chatThinkingActiveExpanded(int count);
+
   /// No description provided for @chatThoughtCollapsed.
   ///
   /// In en, this message translates to:

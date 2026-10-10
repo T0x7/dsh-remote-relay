@@ -185,16 +185,15 @@ class _ChatPaneState extends State<ChatPane>
                     final isMsg = bubble is ChatMessage;
                     final expanded =
                         isMsg && _unfoldedSeqs.contains(bubble.seq);
-                    // D-069: 思考块的开关态。无用户钉住时走自动规则——
-                    // 回答正文未到 = 展开实时思考；正文一到 = 自动收起。
+                    // D-087（改版 D-069）：移动端惯例（Claude / ChatGPT App）
+                    // ——思考中默认也只显示 pill（带实时字数），点开才看
+                    // 实时流；正文到达照旧收起。钉住仍全权覆盖默认。
                     String? reasoning;
-                    var answerStarted = false;
                     if (isMsg) {
                       reasoning = bubble.reasoningText;
-                      answerStarted = bubble.text.isNotEmpty;
                     }
                     final thinkingOpen =
-                        _thinkingPinned ? _thinkingOpen : !answerStarted;
+                        _thinkingPinned ? _thinkingOpen : false;
                     final toolOpen =
                         bubble is ToolNode && _openToolSeqs.contains(bubble.seq);
                     return _BubbleTile(
@@ -839,9 +838,11 @@ class _MetaChip extends StatelessWidget {
   }
 }
 
-/// D-069: 流式思考块。规则对齐 Cherry Studio / Claude：思考先于答案实时
-/// 可见；回答正文一到自动收成「已思考 · N 字」，点按可回看。引擎不持久化
-/// reasoning，durable 气泡覆盖流式行后整块消失——不造持久化假象。
+/// D-069: 流式思考块。D-087 改版（2026-10-10）：对齐移动端惯例（Claude /
+/// ChatGPT App）——思考中默认只显示 pill「💭 思考中 · N 字」（字数实时增长
+/// 证明活着），点按展开看实时流、再点收起；回答正文一到自动收成
+/// 「已思考 · N 字」。引擎不持久化 reasoning，durable 气泡覆盖流式行后整块
+/// 消失——不造持久化假象。`active` 只影响文案时态，不再强制展开正文。
 class _ThinkingBlock extends StatelessWidget {
   const _ThinkingBlock({
     required this.reasoning,
@@ -858,12 +859,25 @@ class _ThinkingBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = L10n.of(context);
-    final header = active
-        ? l10n.chatThinkingActive
-        : (open
+    final Widget header;
+    if (active) {
+      header = Text(
+        reasoning.isEmpty
+            ? l10n.chatThinkingActive
+            : (open
+                ? l10n.chatThinkingActiveExpanded(reasoning.length)
+                : l10n.chatThinkingActiveCount(reasoning.length)),
+        style: const TextStyle(fontSize: 11, color: AppTheme.inkDim),
+      );
+    } else {
+      header = Text(
+        open
             ? l10n.chatThoughtExpanded(reasoning.length)
-            : l10n.chatThoughtCollapsed(reasoning.length));
-    final showBody = active || open;
+            : l10n.chatThoughtCollapsed(reasoning.length),
+        style: const TextStyle(fontSize: 11, color: AppTheme.inkDim),
+      );
+    }
+    final showBody = open;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(
@@ -881,9 +895,7 @@ class _ThinkingBlock extends StatelessWidget {
             behavior: HitTestBehavior.opaque,
             child: SizedBox(
               width: double.infinity,
-              child: Text(header,
-                  style:
-                      const TextStyle(fontSize: 11, color: AppTheme.inkDim)),
+              child: header,
             ),
           ),
           if (showBody)

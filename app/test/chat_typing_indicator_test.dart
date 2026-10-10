@@ -126,8 +126,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 120));
 
-    // 思考块顶上，指示器不叠加。
-    expect(find.textContaining('先查持仓'), findsOneWidget);
+    // D-087：思考块默认收成 pill（正文不上屏），但块本身就是反馈，指示器不叠加。
+    expect(find.textContaining('思考中 · 9 字'), findsOneWidget,
+        reason: 'pill 带实时字数，证明模型活着');
+    expect(find.textContaining('先查持仓'), findsNothing,
+        reason: '正文默认不上屏——点开 pill 才看实时流');
     expect(find.byKey(const ValueKey('thinking-indicator')), findsNothing,
         reason: '思考块本身就是反馈，指示器不叠加');
   });
