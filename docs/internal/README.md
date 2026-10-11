@@ -30,6 +30,7 @@
 | `engine-workspace-membership-flicker-report-20261005.md` | 工作区成员关系随机闪烁 |
 | `engine-ghost-session-rows-report-20261006.md` | 注册表里的「幽灵」会话行，点开永远进不去 |
 | `engine-vanishing-prompt-report-20261006.md` | 提示词在 UI 上消失 |
+| `ui-sweep-and-fixes-20261011.md` | UI 全量走查 + 自动巡检体系（D-089~D-093） |
 | `e2e-engine-askuser-changeset.md` | `ask_user` 工具挂载的 E2E 验证改动集 |
 | `HANDOFF.md` | 仓库交接说明（地址、待办、已知约束） |
 
