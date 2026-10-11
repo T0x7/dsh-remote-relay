@@ -201,7 +201,20 @@ abstract final class ChatEventReader {
         return const [];
       case 'tool/result':
         final error = asObject(event.dataObject['error']);
-        final callId = event.dataObject['callId'];
+        // D-093：callId 在 `message.toolCallId` 里，不在顶层。
+        //
+        // 引擎契约（session-controller 的 SessionEventMap）：
+        //   'tool/result': { turn, step, message: ToolResultMessage, error?, meta? }
+        //   ToolResultMessage.toolCallId —— 「Provider-issued id of the tool
+        //   call this message answers」。
+        //
+        // 之前从 `dataObject['callId']` 读，顶层根本没有这个键 → 永远是 null →
+        // 前向记录 `toolCalls[callId]` 匹配不上 → name 落到默认的 'tool' →
+        // 界面再把 'tool' 过滤掉。合起来的效果是：**真机上每一条工具调用都
+        // 不显示工具名**，只剩一串参数摘要（轨迹页读 `data.name` 所以不受影响，
+        // 于是同一份数据在两屏上表现不一致）。
+        final resultMessage = asObject(event.dataObject['message']);
+        final callId = resultMessage?['toolCallId'];
         String name = 'tool';
         String? arguments;
         // D-070: `?[` 在三元分支里有解析歧义（`toolCalls?` 会被当可空类型），
@@ -215,9 +228,8 @@ abstract final class ChatEventReader {
         // D-070: 结果取 result 消息的 text 块拼接，截断到 8000 字——详情
         // 面板是可滚动的，超长结果的尾部在手机上也没有阅读价值。
         String? result;
-        final message = asObject(event.dataObject['message']);
-        if (message != null) {
-          final text = _textOf(message['content']);
+        if (resultMessage != null) {
+          final text = _textOf(resultMessage['content']);
           if (text.isNotEmpty) {
             // 截断后缀用 U+2026 而非中文括号文案——i18n 守卫禁止 lib/ 出现
             // CJK 字面量，且这里是静态类拿不到 l10n。

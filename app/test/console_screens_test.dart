@@ -193,8 +193,14 @@ void main() {
           seq: 2,
           time: 0,
           data: {
-            'callId': 'call-7',
+            // 引擎契约（session-controller SessionEventMap）：
+            // `tool/result` = {turn, step, message: ToolResultMessage, error?,
+            // meta?} —— callId 在 `message.toolCallId`，顶层没有。
+            // 这条 fixture 此前把 callId 写在顶层，于是**编码了 D-093 这个
+            // bug 本身**：代码读顶层键时它是绿的，真机上工具名却是空的。
             'message': {
+              'role': 'tool',
+              'toolCallId': 'call-7',
               'content': [
                 {'type': 'text', 'text': 'done'},
               ],
@@ -325,8 +331,10 @@ void main() {
         seq: 9,
         time: 0,
         data: {
-          'callId': 'call-1',
           'message': {
+            // 同上：callId 在 message.toolCallId（D-093）。
+            'role': 'tool',
+            'toolCallId': 'call-1',
             'content': [
               {'type': 'text', 'text': 'ok'},
             ],

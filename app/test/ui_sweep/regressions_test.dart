@@ -21,6 +21,70 @@ import 'ui_inventory.dart';
 /// D-091 轨迹窗口：横幅数字颠倒 + 保留方向与文案相反
 /// D-092 follow 重开：mux 重连后被「second snapshot」守卫误杀
 void main() {
+  group('D-093 · 工具行必须显示工具名', () {
+    testWidgets('tool/result 的 callId 从 message.toolCallId 取', (tester) async {
+      // 真机症状：对话页每一条工具调用都只剩「工具调用 + 参数摘要」，
+      // 工具名整个消失；而轨迹页读 data.name 所以照常显示——同一份数据两屏
+      // 不一致。根因：引擎把 callId 放在 `message.toolCallId`，代码从顶层
+      // `data.callId` 读（永远 null），前向记录匹配失败后落到默认名 'tool'，
+      // 再被 UI 过滤掉。
+      //
+      // 这条 fixture 刻意**只**按引擎契约给 tool/result，不带顶层 callId：
+      // 只要将来有人改回顶层读法，这里立刻红。
+      final gateway = FakeEngineGateway();
+      final controller = ChatController(
+        gateway: gateway,
+        eventsRefreshInterval: Duration.zero,
+      )..startEvents();
+      addTearDown(() async {
+        controller.dispose();
+        await gateway.dispose();
+      });
+      await controller.open('s1');
+      await tester.pumpWidget(uiHost(ChatPane(controller: controller)));
+      gateway.raiseReady();
+      gateway.pushFrame(sweepSnapshot(
+        id: 's1',
+        events: [
+          sweepEvent(
+            type: 'tool/call',
+            seq: 1,
+            data: {
+              'turn': 1,
+              'step': 1,
+              'callId': 'call-1',
+              'name': 'mcp__agentstock__news_dive_next',
+              'arguments': '{"limit": 30}',
+            },
+          ),
+          sweepEvent(
+            type: 'tool/result',
+            seq: 2,
+            data: {
+              'turn': 1,
+              'step': 1,
+              // 引擎契约：没有顶层 callId，只有 message.toolCallId。
+              'message': {
+                'role': 'tool',
+                'toolCallId': 'call-1',
+                'content': [
+                  {'type': 'text', 'text': '{"ok": true}'},
+                ],
+              },
+            },
+          ),
+        ],
+      ));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.textContaining('mcp__agentstock__news_dive_next'),
+        findsWidgets,
+        reason: '工具名必须出现在对话页的工具行上（与轨迹页一致）',
+      );
+    });
+  });
+
   group('D-089 · 任务页不得把流错误吞成永久转圈', () {
     testWidgets('MuxStreamError 必须显示成错误卡片', (tester) async {
       final gateway = FakeEngineGateway();
