@@ -84,6 +84,7 @@ class TrajectoryRecord {
     this.cacheWriteTokens,
     this.outputTokens,
     this.reasoningTokens,
+    this.reasoningChars,
     this.provider,
     this.model,
   });
@@ -144,6 +145,10 @@ class TrajectoryRecord {
   final int? outputTokens;
   final int? reasoningTokens;
 
+  /// D-088：assistant/message 里 reasoning 块的正文长度（字符数）。
+  /// 与 [reasoningTokens]（usage 计费口径）是两个数。null = 无思考块。
+  final int? reasoningChars;
+
   /// `request/context` 记录的 provider / model。
   final String? provider;
   final String? model;
@@ -163,6 +168,7 @@ class TrajectoryRecord {
       inputTokens != null ||
       outputTokens != null ||
       reasoningTokens != null ||
+      reasoningChars != null ||
       cacheReadTokens != null ||
       cacheWriteTokens != null;
 }

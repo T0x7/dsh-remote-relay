@@ -831,3 +831,23 @@
   vs 打印屏幕 Text」两层对比定位）。
 - **golden**：`machines_list` 又是 0.18%/7764px，与 10-07/10-10 早记录逐位
   一致、本改动未触及 machines 页——已知漂移，非回归。
+
+## 2026-10-11 D-088：durable 思考回看——「引擎不落盘 reasoning」结论被数据推翻
+
+- **更正 D-069 的平台事实**：解包 4 个现役会话 journal（zstd），reasoning 以
+  `assistant/message.content[]` 的独立块落库（223~1300 字，与 tool-call/text
+  混排），四种来源全部命中。旧结论「journal 全是纯 text 块」是 0.1.7-rc.2
+  代际的实测，对 0.2.0-rc.2（reasoningEffort=max）已不成立。**教训：平台事实
+  也要定期对数据复检——落库格式跟着引擎版本走。**
+- **App 侧两处接住**：①durable 路径 `_reasoningOf()` 解析 reasoning 块 →
+  气泡带「💭 已思考 · N 字」折叠 chip（历史思考可回看）；顺带修掉 pane 里
+  `thinking = streaming ? reasoningText : null` 把 durable 行硬性排除的旧假设。
+  ②轨迹 message 记录新增 `reasoningChars`（正文块字符数，与 usage 的
+  reasoningTokens 计费口径是两个数），详情 KV 显示 `thought`。
+- **边界**：reasoning+tool-call 且无 text 的消息仍不产气泡（tool 节点承载），
+  不为凑 chip 造空卡；旧 journal 无 reasoning 块 → null → 无 chip（兼容）。
+- **i18n 守卫立功**：轨迹 KV 值里的「字」字面量被零硬编码文案守卫逮到——
+  lib/ 禁 CJK 字面量的规矩（静态类拿不到 l10n）再次自证。
+- **测试**：chat_thinking 新增 durable 回看一条；trajectory_projection 两条
+  （有块计数 / 旧消息 null）；全量 382/383（golden 已知漂移 + i18n 守卫当
+  场逮到并修正）。

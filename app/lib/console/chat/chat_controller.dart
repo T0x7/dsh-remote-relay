@@ -49,9 +49,10 @@ class ChatMessage extends ChatBubble {
   /// durable `assistant/message` event has not superseded yet.
   final bool streaming;
 
-  /// D-069: 本行的思考内容。**只有流式行带**——引擎不持久化 reasoning
-  /// （journal 里 assistant/message 全是纯 text 块，实测 40 份），durable
-  /// 气泡到达即覆盖流式行，思考随之消失。这是平台事实，不造持久化假象。
+  /// D-069: 本行的思考内容。流式行来自 reasoning-delta 帧；D-088 起
+  /// durable 行也带——引擎 0.2.0-rc.2 起把 reasoning 作为
+  /// `assistant/message.content[]` 的独立块落库（实测 347/1300 字等多份，
+  /// `reasoningEffort=max`），旧结论「journal 全是纯 text 块」已过时。
   final String? reasoningText;
 }
 
@@ -176,6 +177,11 @@ abstract final class ChatEventReader {
           text: text,
           time: _timeOf(event.time),
           subagentLabel: subagentLabel,
+          // D-088：reasoning 块随 assistant/message 落库（引擎 0.2.0-rc.2
+          // 起），durable 气泡据此渲染「已思考 · N 字」chip，历史可回看。
+          // reasoning+tool-call 且无 text 的消息仍不产气泡——那轮的输出
+          // 由 tool 节点承载，不为凑 chip 造空卡。
+          reasoningText: _reasoningOf(message['content']),
         )];
       case 'tool/call':
         // No bubble of its own: the matching result carries the node, and a
@@ -253,6 +259,22 @@ abstract final class ChatEventReader {
         .where((text) => text.isNotEmpty)
         .join('\n')
         .trim();
+  }
+
+  /// D-088: join the `reasoning` blocks of a ContentBlock list — the
+  /// engine's persisted thinking (0.2.0-rc.2+, `reasoningEffort > 0`).
+  /// Absent on older journals → null, and the pane renders no chip.
+  static String? _reasoningOf(Object? content) {
+    if (content is! List) return null;
+    final reasoning = content
+        .map(asObject)
+        .whereType<Map<String, dynamic>>()
+        .where((block) => block['type'] == 'reasoning')
+        .map((block) => block['text'] as String? ?? '')
+        .where((text) => text.isNotEmpty)
+        .join('\n\n')
+        .trim();
+    return reasoning.isEmpty ? null : reasoning;
   }
 
   static DateTime _timeOf(int ms) =>
@@ -976,8 +998,9 @@ class ChatController extends ChangeNotifier {
           live.append(text);
           return true;
         }
-        // D-069: 思考内容只存在于流式帧。线上帧的准确字段名未实测过（手机
-        // 不落盘 reasoning），这里按两种合理形态防御性接住——`reasoning-delta`
+        // D-069: 思考内容只存在于流式帧（落库走 assistant/message 的
+        // reasoning 块，D-088）。线上帧的准确字段名未实测过，这里按两种
+        // 合理形态防御性接住——`reasoning-delta`
         //（对齐 text-delta 的单字符串）与 `reasoning-chunks`（durable stream
         // 记录里的数 组形态）。都不是就维持旧行为：丢弃。
         final reasoning = _reasoningDeltaOf(chunk);

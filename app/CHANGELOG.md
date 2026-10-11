@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Persisted thinking is now viewable in history (D-088)** — the engine
+  (0.2.0-rc.2+, `reasoningEffort > 0`) persists reasoning as a dedicated
+  content block on `assistant/message`; the app now parses it, so past
+  sessions show the「💭 已思考 · N 字」chip with tap-to-view instead of the
+  thought vanishing when the durable bubble replaces the streaming row. The
+  trajectory ledger records the reasoning character count per message
+  (distinct from the billing-side `reasoningTokens`). Supersedes the D-069
+  premise that journals carry no reasoning — re-verified against four live
+  session journals.
+
 - **Streaming thoughts default to collapsed (D-087)** — while the model is
   thinking, the block now renders as a compact pill「💭 思考中 · N 字」with a
   live character count instead of streaming the full reasoning onto the

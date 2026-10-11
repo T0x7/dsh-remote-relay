@@ -162,12 +162,17 @@ TrajectoryProjection projectTrajectory(
           final timing =
               _assistantTiming(asList(data['stream']), stepStartTime, time);
           final usage = asObject(data['usage']);
+          final message = asObject(data['message']);
           out.add(_Rec(
             seq: seq,
             eventType: event.type,
             kind: TrajectoryKind.message,
             time: time,
-            preview: _textOf(asObject(data['message'])?['content']),
+            preview: _textOf(message?['content']),
+            // D-088：思考随 assistant/message 落库（reasoning 块），
+            // 轨迹记账同样留痕——与 usage 的 reasoningTokens（计费口径）
+            // 是两个数：这里是正文块字符数。
+            reasoningChars: _reasoningCharsOf(message?['content']),
             raw: data,
             turn: _intOf(data['turn']) ?? turn,
             step: _intOf(data['step']) ?? step,
@@ -434,6 +439,7 @@ class _Rec {
     this.cacheWriteTokens,
     this.outputTokens,
     this.reasoningTokens,
+    this.reasoningChars,
     this.provider,
     this.model,
   });
@@ -460,6 +466,7 @@ class _Rec {
   int? cacheWriteTokens;
   int? outputTokens;
   int? reasoningTokens;
+  int? reasoningChars;
   final String? provider;
   final String? model;
 
@@ -486,9 +493,22 @@ class _Rec {
         cacheWriteTokens: cacheWriteTokens,
         outputTokens: outputTokens,
         reasoningTokens: reasoningTokens,
+        reasoningChars: reasoningChars,
         provider: provider,
         model: model,
       );
+}
+
+/// D-088: 数 `content` 里 reasoning 块的正文长度——轨迹记账用，
+/// 与 usage 的 reasoningTokens（计费口径）是两个数。
+int? _reasoningCharsOf(Object? content) {
+  if (content is! List) return null;
+  final total = content
+      .map(asObject)
+      .whereType<Map<String, dynamic>>()
+      .where((block) => block['type'] == 'reasoning')
+      .fold(0, (sum, block) => sum + (block['text'] as String? ?? '').length);
+  return total > 0 ? total : null;
 }
 
 /// 拼 `content` 里的 text 块。

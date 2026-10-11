@@ -502,7 +502,9 @@ class _BubbleTile extends StatelessWidget {
         final kind = _metaKindOf(text);
         final metaOpen = foldExpanded;
         // 思考块挂在气泡上方：先思考后回答，读序即时间序。
-        final thinking = streaming ? reasoningText : null;
+        // D-088：reasoning 不再是流式行专属——durable 气泡也带（引擎落库
+        // reasoning 块），历史思考同样走折叠 chip。
+        final thinking = reasoningText;
         final hasThinking = thinking != null && thinking.isNotEmpty;
         Widget body;
         if (kind != null) {
@@ -841,8 +843,9 @@ class _MetaChip extends StatelessWidget {
 /// D-069: 流式思考块。D-087 改版（2026-10-10）：对齐移动端惯例（Claude /
 /// ChatGPT App）——思考中默认只显示 pill「💭 思考中 · N 字」（字数实时增长
 /// 证明活着），点按展开看实时流、再点收起；回答正文一到自动收成
-/// 「已思考 · N 字」。引擎不持久化 reasoning，durable 气泡覆盖流式行后整块
-/// 消失——不造持久化假象。`active` 只影响文案时态，不再强制展开正文。
+/// 「已思考 · N 字」。D-088 起 durable 气泡同样带 reasoning（引擎
+/// 0.2.0-rc.2+ 落库 reasoning 块），历史会话的思考也可回看——不再是
+/// 「durable 覆盖即消失」。`active` 只影响文案时态，不再强制展开正文。
 class _ThinkingBlock extends StatelessWidget {
   const _ThinkingBlock({
     required this.reasoning,

@@ -30,7 +30,39 @@ List<Object?> text(String body) => [
       {'type': 'text', 'text': body},
     ];
 
+List<Object?> reasoningThenText(String reasoning, String body) => [
+      {'type': 'reasoning', 'text': reasoning},
+      {'type': 'text', 'text': body},
+    ];
+
 void main() {
+  group('D-088：reasoning 块落库的轨迹留痕', () {
+    test('assistant/message 的 reasoning 块计为 reasoningChars，正文预览不受影响', () {
+      final projection = projectTrajectory([
+        ev(1, 'turn/start', {'turn': 1}, time: 900),
+        ev(2, 'step/start', {'turn': 1, 'step': 1}, time: 1000),
+        ev(3, 'assistant/message', {
+          'turn': 1,
+          'step': 1,
+          'message': {'content': reasoningThenText('想想魔方阵', 'Answer: 15.')},
+          'stream': <Object?>[],
+        }, time: 3000),
+      ]);
+      final msg = projection.records.single;
+      expect(msg.reasoningChars, '想想魔方阵'.length);
+      expect(msg.preview, 'Answer: 15.', reason: '正文预览仍只取 text 块');
+    });
+
+    test('无 reasoning 块的旧消息 reasoningChars 为 null（旧 journal 兼容）', () {
+      final projection = projectTrajectory([
+        ev(1, 'assistant/message', {
+          'message': {'content': text('hi')},
+        }, time: 3000),
+      ]);
+      expect(projection.records.single.reasoningChars, isNull);
+    });
+  });
+
   group('轮次与步骤边界', () {
     test('turn/step 事件本身不产生记录，只切分分组', () {
       final projection = projectTrajectory([

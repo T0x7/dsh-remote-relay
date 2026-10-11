@@ -861,6 +861,8 @@ class _Inspector extends StatelessWidget {
                         _kv('output', '${record.outputTokens}', _mono),
                       if (record.reasoningTokens != null)
                         _kv('reasoning', '${record.reasoningTokens}', _mono),
+                      if (record.reasoningChars != null)
+                        _kv('thought', '${record.reasoningChars}', _mono),
                     ]
                   : [
                       Text('—',

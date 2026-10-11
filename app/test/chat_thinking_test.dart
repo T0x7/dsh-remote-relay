@@ -144,4 +144,60 @@ void main() {
     expect(find.textContaining('不该默认上屏'), findsOneWidget,
         reason: '钉住的展开是用户显式意愿，不随正文到达被自动收起');
   });
+
+  testWidgets('D-088：durable 气泡带 reasoning 块——历史会话的思考可回看', (tester) async {
+    // 引擎 0.2.0-rc.2+ 把 reasoning 作为 assistant/message.content 的独立
+    // 块落库（实测 347/1300 字等多份）。durable 路径必须把它带上。
+    final gateway = FakeEngineGateway();
+    final controller = ChatController(gateway: gateway, eventsRefreshInterval: Duration.zero)
+      ..startEvents();
+    gateway.raiseReady();
+    await controller.open('session-1');
+    addTearDown(() async {
+      controller.dispose();
+      await gateway.dispose();
+    });
+    await tester.pumpWidget(_host(ChatPane(controller: controller)));
+    gateway.pushFrame(FollowSnapshot(
+      header: SessionHeader(version: 4, id: 'session-1', createdAt: 0, isSeeded: false),
+      cursor: 0,
+      records: [
+        FollowEvent(SessionWireEvent(
+          type: 'assistant/message',
+          seq: 25,
+          time: DateTime.now().millisecondsSinceEpoch,
+          data: {
+            'turn': 2,
+            'step': 1,
+            'message': {
+              'id': 'a25',
+              'content': [
+                {'type': 'reasoning', 'text': secret},
+                {'type': 'text', 'text': 'Answer: 15.'},
+              ],
+              'source': {'kind': 'model', 'provider': 'p', 'model': 'm'},
+              'role': 'assistant',
+            },
+            'stream': <Object?>[],
+          },
+        )),
+      ],
+      hasMore: false,
+      projections: const SessionProjectionBaseline(asOfSeq: 0, values: Projections()),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('💭 已思考 · ${secret.length} 字（点按展开）'), findsOneWidget,
+        reason: 'durable 气泡的思考以折叠 chip 呈现');
+    expect(find.textContaining('不该默认上屏'), findsNothing,
+        reason: '默认收起——点开才看');
+
+    await tester.tap(find.text('💭 已思考 · ${secret.length} 字（点按展开）'));
+    await tester.pump();
+    expect(find.textContaining('不该默认上屏'), findsOneWidget,
+        reason: '展开可回看历史思考');
+    expect(find.textContaining('Answer: 15'), findsOneWidget,
+        reason: '回答正文照常上屏');
+  });
 }
