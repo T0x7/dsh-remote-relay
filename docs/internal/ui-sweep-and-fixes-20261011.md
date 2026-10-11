@@ -305,3 +305,19 @@ CI 的失败原因会变成「版本不对」而不是真正的回归。
 
 纪律复述：**修完必做「回退即红」**——把修复改回旧写法跑一遍，守门必须红；
 本轮第一次回退验证就暴露了「守门根本没咬住」。
+
+### D-103（同轮顺带）：空会话残留回底钮
+
+验 D-102 时看到：长会话翻离底 → 新建 0 轮空会话 → 回底钮还亮着。
+
+- **诊断被探针推翻了**：我先猜「切换时 ScrollPosition metrics 陈旧」，真机探针
+  显示 `didUpdateWidget ctrlChanged=false` —— ConsolePage 新建会话**复用同一个
+  ChatController**（只调 `open()` 换 sessionId），widget 层的「换 controller 就
+  复位」根本没执行，`_followBottom=false` 一路带进新会话；空列表没有滚动事件去
+  纠正它。**第一版假设不成立时，探针比继续推理快一个量级。**
+- **修法**：build 里按 `controller.sessionId` 变化复位 + 按钮显隐加「有气泡」兜底。
+- **测试侧两个坑**：① 同一 controller 二次 `open()` 在 `testWidgets` 里直接
+  `await` 会吊死（`await _closeJournal()`），要 `tester.runAsync`；② `pushFrame`
+  也必须放进**同一个** `runAsync` 内——broadcast stream 不缓存，订阅循环起来前推的
+  帧会被丢掉，`loading` 停在 true，页面走 spinner 分支，断言会**假绿**。写完先
+  打印 `loading / list / btn` 三个数确认渲染到了目标状态，再看断言红不红。

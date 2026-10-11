@@ -44,6 +44,13 @@ class _ChatPaneState extends State<ChatPane>
   /// 此时右下角给「回到底部」悬浮钮，点它或滑回底部即恢复跟随。
   bool _followBottom = true;
 
+  /// D-103: 上一次 build 时的会话 id。真机新建会话时 ConsolePage 复用
+  /// **同一个** [ChatController]（只是调 `open()` 换 sessionId），所以
+  /// [didUpdateWidget] 里那条「换 controller 就复位」根本不会触发——
+  /// 贴底开关会从上一段会话一路带进新会话。真正能观察到「换会话」的地方
+  /// 是 build：sessionId 变了就是在换会话。
+  String? _renderedSessionId;
+
   /// D-102: 手指正按在列表上（drag 已开始、尚未结束）。
   ///
   /// 自动贴底的每个 `jumpTo` 都是一次「抢占」——落在手势中途就把它打断。
@@ -222,6 +229,14 @@ class _ChatPaneState extends State<ChatPane>
     final l10n = L10n.of(context);
     final controller = widget.controller;
 
+    // D-103: 见 [_renderedSessionId]。在 build 里改普通字段是安全的——当前
+    // 正在构建，本次 build 就会按复位后的值渲染按钮显隐。
+    if (controller.sessionId != _renderedSessionId) {
+      _renderedSessionId = controller.sessionId;
+      _followBottom = true;
+      _dragging = false;
+    }
+
     if (controller.sessionId == null) {
       return _NoSession(l10n: l10n);
     }
@@ -313,7 +328,11 @@ class _ChatPaneState extends State<ChatPane>
             // 回底也该由你亲自开启。
             // D-102: 手势进行中不给：拇指底下冒出一颗按钮既没用又挡路，
             // 还可能被同一次手势的点按误命中。
-            if (!_followBottom && !_dragging)
+            // D-103: 列表里没有气泡时也不给——空会话连「底」都不存在，
+            // 这颗按钮点下去只会跳到 0。
+            if (!_followBottom &&
+                !_dragging &&
+                controller.bubbles.isNotEmpty)
               Positioned(
                 right: AppTheme.m,
                 bottom: AppTheme.m,

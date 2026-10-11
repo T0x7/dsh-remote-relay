@@ -1,4 +1,4 @@
-# App 端实测踩坑与修复（D-067 ~ D-102）
+# App 端实测踩坑与修复（D-067 ~ D-103）
 
 > 这份文档记录 **Flutter App 在真机上暴露的问题、根因与修复**。每条都是先
 > 实锤根因、再写红测试、最后真机复验的闭环——多数坑的共同点是「看起来是
@@ -297,6 +297,29 @@ ScrollEnd 分支补一次强制重画。
 再滑，列表正常响应、回底钮重新出现；连做三轮「点回底 + 上下滑」仍无锁死，
 logcat 无 flutter 异常。
 
+### 6.9 顺带挖出：空会话残留回底钮（D-103）
+
+验 D-102 时顺手发现的：长会话里翻离底 → 新建一个 0 轮空会话 → 右下角那颗
+「回到底部」**还亮着**，而列表里连一个气泡都没有，根本没有「底」可回。
+
+第一版诊断是错的（我猜「切换时 ScrollPosition metrics 陈旧」），**探针实锤**的
+真因是：**ConsolePage 新建会话时复用同一个 `ChatController`**（只是调
+`open()` 换 sessionId），`ChatPane` 的 widget 和 controller 都没换，于是
+`didUpdateWidget` 里那条「换 controller 就复位贴底开关」**根本没执行**——
+`_followBottom=false` 从上一段会话一路带进新会话；空列表又不会产生任何滚动
+事件去纠正它，按钮就一直挂在那儿。
+
+**修法两处**：① `ChatPane` 在 build 里按 `sessionId` 变化复位（那才是真正能
+观察到「换会话」的地方）；② 按钮显隐加「列表里有气泡」兜底。
+
+**守门写不出来的那一段，值得记**：这条路径（同 controller 二次 `open`）在
+`testWidgets` 里直接 `await controller.open(...)` 会**把测试吊死**（`open` 首行
+`await _closeJournal()` 等旧流关闭），必须包进 `tester.runAsync`；而且推帧也要
+一起放进 `runAsync` 内——否则 broadcast stream 不缓存，帧在订阅循环起来前就
+丢了，`_loading` 永远停在 true，页面渲染的是 spinner 分支，断言会**假绿**。
+
+**复验**：真机走同一条路径，空会话干净。
+
 ---
 
 ## 7. 环境陷阱速查
@@ -313,6 +336,8 @@ logcat 无 flutter 异常。
 | 引擎直连好 ≠ 手机端好 | curl `127.0.0.1:3080/api/…` 与 WS mux 秒回，手机同一端点却无响应 | 手机走的是 `https://relay.example.com`（VPS）→ 插件隧道 → 引擎；先确认 `GET /dsh-remote/session` 里的 `tunnel.relayUrl`，别在引擎侧空查 |
 | `applyFrame` 的通知被 48ms 合并定时器延后 | widget 测试里 `pump()` 零时长后断言「UI 应该更新了」——其实通知还没发出，守门一片假绿 | 推时钟：`pump(100ms)`；`ChatController._scheduleStreamPaint` |
 | 懒加载 ListView 的 `maxScrollExtent` 对「往已有气泡追加内容」不增长 | 拿 `pixels` 与 `maxScrollExtent` 的差值当断言基准会踩到边界/空断言 | 用**不变量**断言（手势往下拖 pixels 只许变小）；要真让列表变高得推**新 durable 记录**（新 item）|
+| `testWidgets` 里对同一 controller 二次 `open()` | 直接 `await` 会把测试吊死（`open` 首行 `await _closeJournal()`）；改用 `runAsync` 后又可能**假绿**——帧在订阅循环起来前就被丢掉，`loading` 停在 true，页面渲染 spinner 分支 | `open` + `pushFrame` **都放进同一个 `tester.runAsync` 内部**；跑前先断言 `loading=false && list=1`，别让它用 spinner 分支蒙过去 |
+| 「换会话」的信号可能根本不走 `didUpdateWidget` | ConsolePage 新建/切换会话复用同一个 controller，只调 `open()`——widget 层的「换 controller 就复位」形同虚设 | 需要按会话复位的 UI 状态一律以 `controller.sessionId` 为准，在 build 里比对 |
 | 中继 URL 会话凭据不可外借 | 拿插件 `active` 那条会话的 qrUrl/hash 去 `wss://` 握手，一律 401 | 设备侧 bearer 是 `<sid>.<expMs>.<mid>.<t>.<hash>`，且必须已被**那台 VPS 中继**认识；换会话号就换一套凭据 |
 
 ## 8. 已知引擎侧问题（不在本仓，需引擎修）

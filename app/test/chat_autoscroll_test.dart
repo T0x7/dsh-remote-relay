@@ -319,4 +319,47 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
   });
+  /// D-103：换到**空会话**后不得残留回底钮。
+  ///
+  /// 真机（小米）：在长会话里往上翻了历史，接着新建一个 0 轮空会话——
+  /// 右下角那颗「回到底部」仍然亮着，而列表里连一个气泡都没有，根本没有
+  /// 「底」可回。
+  ///
+  /// 病根（探针实锤，不是猜的）：ConsolePage 新建会话时**复用同一个
+  /// ChatController**（调 `open()` 换 sessionId），于是 ChatPane 的
+  /// widget/controller 都没换——`didUpdateWidget` 里那条「换会话就复位
+  /// 贴底开关」根本没执行，`_followBottom=false` 原样带进了空会话；而空
+  /// 列表不会再产生任何滚动事件去纠正它，按钮就一直挂在那儿。
+  ///
+  /// 修法两处：① ChatPane 在 build 里按 sessionId 变化复位（真正收到
+  /// 「换会话」信号的地方）；② 按钮显隐加「列表里有东西」兜底。
+  testWidgets('D-103 换到空会话：不残留回底钮', (tester) async {
+    final harness = await _openConsole(
+        tester, records: [FollowEvent(_userMessage(1, '开始输出'))]);
+    final controller = harness.controller;
+    await _pumpStickyBottom(tester, controller);
+
+    // 先离底：此刻回底钮理应出现，贴底开关置 false。
+    await tester.drag(find.byType(ListView), const Offset(0, 600));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('scroll-to-bottom')), findsOneWidget,
+        reason: '前置条件：离底后回底钮应出现');
+
+    // 走真机那条路：**同一个 controller** 再 open 另一个（空）会话。
+    // 必须包在 runAsync 里——`open` 首行 `await _closeJournal()` 会等旧流
+    // 关闭，在 testWidgets 的 FakeAsync 区里直接 await 会把测试吊死。
+    await tester.runAsync(() async {
+      await controller.open('session-2');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      harness.gateway.pushFrame(_snapshot(id: 'session-2', records: const []));
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(controller.bubbles, isEmpty, reason: '前置条件：这确实是个空会话');
+    expect(find.byKey(const ValueKey('scroll-to-bottom')), findsNothing,
+        reason: '空会话没有任何东西可回，不该残留回底钮');
+  });
 }
