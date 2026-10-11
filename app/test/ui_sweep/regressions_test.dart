@@ -53,7 +53,7 @@ void main() {
               'turn': 1,
               'step': 1,
               'callId': 'call-1',
-              'name': 'mcp__agentstock__news_dive_next',
+              'name': 'mcp__demo__lookup',
               'arguments': '{"limit": 30}',
             },
           ),
@@ -78,7 +78,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.textContaining('mcp__agentstock__news_dive_next'),
+        find.textContaining('mcp__demo__lookup'),
         findsWidgets,
         reason: '工具名必须出现在对话页的工具行上（与轨迹页一致）',
       );

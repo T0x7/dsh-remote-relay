@@ -202,30 +202,30 @@ void main() {
         (tester) async {
       await mount(
         tester,
-        frames: framesWith('新闻分析', ['job-scheduled-judge-1', 'job-guba-x']),
+        frames: framesWith('Reports', ['job-scheduled-judge-1', 'job-gamma-x']),
       );
 
-      await tester.enterText(find.byType(TextField), 'guba');
+      await tester.enterText(find.byType(TextField), 'gamma');
       for (var i = 0; i < 6; i++) {
         await tester.pump(const Duration(milliseconds: 40));
       }
 
-      expect(find.text('新闻分析'), findsOneWidget,
+      expect(find.text('Reports'), findsOneWidget,
           reason: 'a search that empties the screen tells the user nothing');
-      expect(find.text('job-guba-x'), findsOneWidget);
+      expect(find.text('job-gamma-x'), findsOneWidget);
       expect(find.text('job-scheduled-judge-1'), findsNothing);
     });
 
     testWidgets('searching a workspace name keeps the group but drops its rows',
         (tester) async {
-      await mount(tester, frames: framesWith('新闻分析', ['job-a', 'job-b']));
+      await mount(tester, frames: framesWith('Reports', ['job-a', 'job-b']));
 
-      await tester.enterText(find.byType(TextField), '新闻');
+      await tester.enterText(find.byType(TextField), 'Report');
       for (var i = 0; i < 6; i++) {
         await tester.pump(const Duration(milliseconds: 40));
       }
 
-      expect(find.text('新闻分析'), findsOneWidget);
+      expect(find.text('Reports'), findsOneWidget);
       expect(find.text('job-a'), findsNothing,
           reason: 'the user asked for the workspace, not for its first sessions');
     });

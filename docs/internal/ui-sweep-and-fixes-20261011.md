@@ -156,7 +156,7 @@ logcat 干净。
 ## 5. D-093 · 工具调用不显示工具名（本轮最隐蔽的一个）
 
 **真机症状**：对话页每条工具调用只剩「工具调用 + 参数摘要」，工具名消失；而**轨
-迹页照常显示** `mcp__agentstock__news_dive_next` / `todo_write`——同一份数据，两屏
+迹页照常显示** `mcp__demo__lookup` / `todo_write`——同一份数据，两屏
 不一致。
 
 **根因（引擎契约 vs 代码）**：deepseek-harness 的 `SessionEventMap` 定义

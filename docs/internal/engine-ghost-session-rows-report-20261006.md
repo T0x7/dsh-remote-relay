@@ -12,7 +12,7 @@
 
 - ~~「引擎没有目录 watcher，直写文件永不索引」~~ —— 不成立。引擎 `session/list`
   每次调用**零缓存全量重扫**目录树（v3.269 补丁注释原话），无需 watcher；同一条
-  Python 导入路径写的 95 条 `job-*` 会话（scheduled-judge/cnradar/paper-trade…）都被正常索引。
+  Python 导入路径写的 95 条 `job-*` 会话（scheduled-judge/alpha/paper-trade…）都被正常索引。
 - **真因**：host-app 的会话导入器（`scripts/dsh_import_session.mjs`，v3.266 适配
   0.2.0 时）把 `title` 留在了 v4 header 白名单里，而 v4 契约已把 title 移到
   `session/title` 事件、对 header **严格校验**——`readHeader` 判 `malformed`

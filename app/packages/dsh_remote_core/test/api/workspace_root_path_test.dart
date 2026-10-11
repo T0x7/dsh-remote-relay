@@ -6,7 +6,7 @@
 /// required` and an empty file tree on device.
 ///
 /// Measured against the live engine on 2026-10-04 (session
-/// `job-guba-judge-20261004-201720`):
+/// `job-gamma-judge-20261004-201720`):
 ///
 /// | `path` sent | result                                     |
 /// |-------------|--------------------------------------------|

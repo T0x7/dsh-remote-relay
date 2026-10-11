@@ -73,7 +73,7 @@ class SessionTitleCache extends ChangeNotifier {
 
   /// Record a header title. Blank titles are ignored on purpose: a header with
   /// an empty `title` is a session that has not been named yet, and storing
-  /// that would replace a perfectly readable `job-cnradar-2026…` id with
+  /// that would replace a perfectly readable `job-alpha-2026…` id with
   /// nothing at all.
   Future<void> remember(String sessionId, String? title) async {
     final trimmed = title?.trim();

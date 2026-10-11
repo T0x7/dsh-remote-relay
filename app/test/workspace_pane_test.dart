@@ -35,16 +35,16 @@ const _other = WorkspaceDirectoryEntry(
 const _index = WorkspaceDirectoryEntry(
     name: 'index.ts', type: WorkspaceEntryType.file, size: 21);
 
-/// D-042 夹具：散落在根层的文件（用户 news/ 里那 23 个 guba-judge_*.md 的形态）。
+/// D-042 夹具：散落在根层的文件（根层散落的 23 个 report_*.md 的形态）。
 const _loose = WorkspaceDirectoryEntry(
-  name: 'guba-judge_2026-09-22_1218_failed.md',
+  name: 'gamma-judge_2026-09-22_1218_failed.md',
   type: WorkspaceEntryType.file,
   size: 4096,
 );
 
 /// 根层一个真实目录，用来证明它留在分组之外。
 const _newsDir =
-    WorkspaceDirectoryEntry(name: 'intraday', type: WorkspaceEntryType.directory);
+    WorkspaceDirectoryEntry(name: 'reports', type: WorkspaceEntryType.directory);
 
 /// 子目录里同样散落的文件 —— 用来证明"只在根层折叠"。
 const _note =
@@ -257,10 +257,10 @@ void main() {
         entries: [_loose, _other, _newsDir],
         truncated: false,
       );
-      // workspaceRoot 默认 '/ws'，所以工作区路径 guba-*.md 对应绝对路径
-      // /ws/guba-*.md —— 和 Host 接受两种词汇的行为一致。
+      // workspaceRoot 默认 '/ws'，所以工作区路径 report-*.md 对应绝对路径
+      // /ws/report-*.md —— 和 Host 接受两种词汇的行为一致。
       gateway.workspaceFiles['/ws/${_loose.name}'] = const WorkspaceFileText(
-        absolutePath: '/ws/guba-judge_2026-09-22_1218_failed.md',
+        absolutePath: '/ws/gamma-judge_2026-09-22_1218_failed.md',
         version: 'v1',
         bytes: 4096,
         offset: 1,
@@ -275,11 +275,11 @@ void main() {
       await open(tester);
 
       expect(find.text('未分类'), findsOneWidget);
-      expect(find.text('intraday'), findsOneWidget);
+      expect(find.text('reports'), findsOneWidget);
 
       // 顺序即归属：目录 → 分组标题 → 分组内文件。目录落在分组标题之前，
       // 说明它没有被收进去。
-      final dirY = tester.getTopLeft(find.text('intraday')).dy;
+      final dirY = tester.getTopLeft(find.text('reports')).dy;
       final groupY = tester.getTopLeft(find.text('未分类')).dy;
       final fileY = tester.getTopLeft(find.text(_loose.name)).dy;
       expect(dirY, lessThan(groupY));
@@ -308,7 +308,7 @@ void main() {
       expect(find.text(_loose.name), findsNothing);
       expect(find.text('weird.sock'), findsNothing,
           reason: 'other 类型也是"没归置"，跟文件一起收');
-      expect(find.text('intraday'), findsOneWidget,
+      expect(find.text('reports'), findsOneWidget,
           reason: '真实目录在分组之外，收起不该动它');
       expect(find.byIcon(Icons.chevron_right), findsOneWidget);
 
@@ -316,7 +316,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text(_loose.name), findsOneWidget);
-      expect(find.text('intraday'), findsOneWidget);
+      expect(find.text('reports'), findsOneWidget);
     });
 
     testWidgets('根层只有目录时不出现分组', (tester) async {
@@ -329,7 +329,7 @@ void main() {
 
       expect(find.text('未分类'), findsNothing,
           reason: '没有可归置的文件就不该凭空造一个分组');
-      expect(find.text('intraday'), findsOneWidget);
+      expect(find.text('reports'), findsOneWidget);
     });
 
     testWidgets('根层只有散落文件时照样分组（规则统一，不看目录数）',
@@ -354,14 +354,14 @@ void main() {
         entries: [_newsDir],
         truncated: false,
       );
-      gateway.workspaceListings['intraday'] = const WorkspaceDirectoryListing(
-        path: 'intraday',
+      gateway.workspaceListings['reports'] = const WorkspaceDirectoryListing(
+        path: 'reports',
         entries: [_index, _note],
         truncated: false,
       );
       await open(tester);
 
-      await tester.tap(find.text('intraday'));
+      await tester.tap(find.text('reports'));
       await tester.pumpAndSettle();
 
       expect(find.text('未分类'), findsNothing,

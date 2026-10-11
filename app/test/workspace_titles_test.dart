@@ -21,7 +21,7 @@ import 'factories.dart';
 /// `session/follow` 的首帧 header 里带 `title`（`SessionHeader.title`），而 App
 /// 为了打开这个会话已经付过那笔请求了——顺手把 title 记下来是零成本。
 ///
-/// 剩下的会话如实显示 id。`job-cnradar-20260924-110450` 这种 id 本身带任务名和
+/// 剩下的会话如实显示 id。`job-alpha-20260924-110450` 这种 id 本身带任务名和
 /// 时间戳，对定时任务够读；真正读不出的是子代理那批裸 uuid，而它们多数正是
 /// 用户会点进去看的。
 Widget _host(Widget child) => MaterialApp(
@@ -167,7 +167,7 @@ void main() {
     await cache.remember('b', '');
     await cache.remember('c', '真名');
     // 一个都记不进去：还没命名的会话的 header.title 是空的，把它存下来等于
-    // 用空白替换掉本来可读的 job-cnradar-2026…。
+    // 用空白替换掉本来可读的 job-alpha-2026…。
     expect(cache.length, 1);
     expect(cache.titleOf('a'), 'a');
     expect(cache.titleOf('b'), 'b');
