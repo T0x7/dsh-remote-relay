@@ -850,6 +850,9 @@ class L10nZh extends L10n {
   String get jobsKillRequested => '已请求终止';
 
   @override
+  String get jobsNoFirstFrame => '任务列表没有回第一帧（引擎未响应）';
+
+  @override
   String get jobsAlreadyFinished => '该任务已经结束了';
 
   @override

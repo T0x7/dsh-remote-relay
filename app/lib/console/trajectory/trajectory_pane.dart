@@ -493,6 +493,17 @@ class _TimelinePainter extends CustomPainter {
 }
 
 /// 记录表：轮次分组 + 类型/内容两列。
+/// 一条记录 + 它所属的轮次。
+///
+/// 摊平之后才知道哪条被窗口切掉了：保最新的 80 条，就不可能在还不知道
+/// 总数的情况下从前往后数。
+class _Row {
+  const _Row({required this.turn, required this.record});
+
+  final TrajectoryTurn turn;
+  final TrajectoryRecord record;
+}
+
 class _RecordTable extends StatelessWidget {
   const _RecordTable({
     required this.turns,
@@ -517,27 +528,40 @@ class _RecordTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rows = <Widget>[];
-    var budget = TrajectoryPane.maxRenderedRows;
-    var truncated = 0;
 
+    // D-090：窗口保**最新**的 maxRenderedRows 条记录。
+    //
+    // 原来从最老的轮次起顺次消耗预算，于是「保留最近 N 条」实际保住了最老的
+    // N 条、把最新的一段丢在窗外：真机上会话末尾的 11 条在轨迹页根本看不到，
+    // 而横幅还写着「更早的 80 条已丢弃」。轨迹页的价值是「刚刚发生了什么」，
+    // 丢掉最新一段等于把这页废掉。
+    //
+    // 做法：先摊平，倒着数够不够 80 条，再正序渲染——header 仍然只在它
+    // 确实还有记录的时候才出现（空 header 会留一条没有内容的分隔线）。
+    final flattened = <_Row>[];
     for (final turn in turns) {
-      if (budget <= 0) {
-        truncated += turn.records.length;
-        continue;
-      }
-      rows.add(_TurnHeader(turn: turn, l10n: l10n));
       for (final record in turn.records) {
-        if (budget <= 0) {
-          truncated++;
-          continue;
-        }
-        budget--;
-        rows.add(_RecordRow(
-          record: record,
-          l10n: l10n,
-          onTap: () => onSelect(record),
-        ));
+        flattened.add(_Row(turn: turn, record: record));
       }
+    }
+    final windowedOut = flattened.length > TrajectoryPane.maxRenderedRows
+        ? flattened.length - TrajectoryPane.maxRenderedRows
+        : 0;
+    final visible = windowedOut == 0
+        ? flattened
+        : flattened.sublist(windowedOut);
+
+    TrajectoryTurn? lastHeader;
+    for (final row in visible) {
+      if (!identical(row.turn, lastHeader)) {
+        rows.add(_TurnHeader(turn: row.turn, l10n: l10n));
+        lastHeader = row.turn;
+      }
+      rows.add(_RecordRow(
+        record: row.record,
+        l10n: l10n,
+        onTap: () => onSelect(row.record),
+      ));
     }
 
     return ListView(
@@ -572,13 +596,17 @@ class _RecordTable extends StatelessWidget {
               ),
             ),
         ],
-        if (truncated > 0)
+        if (windowedOut > 0)
           Padding(
             padding: const EdgeInsets.only(bottom: AppTheme.s),
             child: Text(
+              // D-090：实参顺序曾经按 `(kept, dropped)` 传，而生成的签名是
+              // `(dropped, kept)`（l10n/generated/app_localizations_zh.dart:894）。
+              // 位置传参没有类型检查，两个 int 安静地交换了位置——真机横幅显示
+              // 「只保留最近 11 条（更早的 80 条已丢弃）」，而实际保留 80 丢 11。
               l10n.trajectoryTruncated(
-                TrajectoryPane.maxRenderedRows,
-                truncated,
+                windowedOut,
+                visible.length,
               ),
               style: const TextStyle(fontSize: 11, color: AppTheme.warn),
             ),

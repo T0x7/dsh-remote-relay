@@ -145,6 +145,79 @@ class FakeEngineGateway implements EngineGateway {
     _jobsController.add({'type': 'rows', 'jobs': jobs});
   }
 
+  /// The job/list stream's **error** channel.
+  ///
+  /// The Host delivers per-stream failures here, not as an item — a consumer
+  /// that only reads `items` sees nothing at all and cannot tell "empty result"
+  /// from "the stream died opening". [MuxStream.forTesting] only accepted an
+  /// item source, so this path was unreachable in every test until the
+  /// constructor grew an `errors:` seam (2026-10-11).
+  final _jobErrorsController = StreamController<MuxStreamError>.broadcast();
+
+  /// Fail the job/list stream the way a real carrier does.
+  void raiseJobStreamError({
+    String code = 'gateway/internal',
+    String message = 'job stream died',
+  }) {
+    _jobErrorsController.add(MuxStreamError(code: code, message: message));
+  }
+
+  /// One wire-shaped job row. The engine's zod codec is strict, so a fixture
+  /// missing `kind`/`startedAt`/`output` is not a sparser card — it is a frame
+  /// the real Host would refuse. Fixtures stay honest here on purpose.
+  static Map<String, dynamic> jobRow({
+    required String id,
+    String status = 'running',
+    String kind = 'bash',
+    String? label,
+    String? progress,
+    String? detail,
+    int? startedAt,
+    int? finishedAt,
+    Map<String, dynamic>? error,
+  }) =>
+      {
+        'id': id,
+        'kind': kind,
+        'label': label ?? 'job $id',
+        'status': status,
+        'progress': ?progress,
+        'detail': ?detail,
+        'startedAt': startedAt ?? 1791600000000,
+        'finishedAt': ?finishedAt,
+        'output': const {'total': 0, 'earliest': 0},
+        'error': ?error,
+      };
+
+  /// A roster covering all four card states in one frame.
+  void raiseFullJobRows() => raiseJobRows([
+        jobRow(
+          id: 'job-running',
+          progress: '3/10 步',
+          startedAt: DateTime.now()
+              .subtract(const Duration(seconds: 42))
+              .millisecondsSinceEpoch,
+        ),
+        jobRow(
+          id: 'job-done',
+          status: 'completed',
+          label: '已完成的任务',
+          finishedAt: 1791600060000,
+        ),
+        jobRow(
+          id: 'job-failed',
+          status: 'failed',
+          label: '失败的任务',
+          detail: 'exit 1',
+          error: const {'name': 'CommandError', 'message': 'exit 1'},
+        ),
+        jobRow(
+          id: 'job-pending',
+          status: 'queued',
+          label: '排队中的任务',
+        ),
+      ]);
+
   @override
   String newRequestId() => 'fake-req-${_requestSeq++}';
 
@@ -674,12 +747,17 @@ class FakeEngineGateway implements EngineGateway {
   }
 
   @override
-  MuxStream listJobs({required String sessionId}) =>
-      MuxStream.forTesting(_jobsController.stream);
+  MuxStream listJobs({required String sessionId}) => MuxStream.forTesting(
+        _jobsController.stream,
+        errors: _jobErrorsController.stream,
+      );
 
   @override
   MuxStream followJob({required String jobId, String? sessionId, int? from}) =>
-      MuxStream.forTesting(_jobsController.stream);
+      MuxStream.forTesting(
+        _jobsController.stream,
+        errors: _jobErrorsController.stream,
+      );
 
   final List<Map<String, dynamic>> pluginManagerCalls = [];
   bool failPluginManager = false;
@@ -848,5 +926,6 @@ class FakeEngineGateway implements EngineGateway {
     await _eventController.close();
     await _controlController.close();
     await _jobsController.close();
+    await _jobErrorsController.close();
   }
 }

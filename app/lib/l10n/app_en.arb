@@ -270,6 +270,7 @@
   "jobsStatePending": "pending",
   "jobsKill": "Kill",
   "jobsKillRequested": "Kill requested",
+  "jobsNoFirstFrame": "The job list never sent its first frame (engine did not answer)",
   "jobsAlreadyFinished": "That job had already finished",
 
   "hostSessions": "Sessions",

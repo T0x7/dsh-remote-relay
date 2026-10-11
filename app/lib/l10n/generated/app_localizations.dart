@@ -1663,6 +1663,12 @@ abstract class L10n {
   /// **'Kill requested'**
   String get jobsKillRequested;
 
+  /// No description provided for @jobsNoFirstFrame.
+  ///
+  /// In en, this message translates to:
+  /// **'The job list never sent its first frame (engine did not answer)'**
+  String get jobsNoFirstFrame;
+
   /// No description provided for @jobsAlreadyFinished.
   ///
   /// In en, this message translates to:

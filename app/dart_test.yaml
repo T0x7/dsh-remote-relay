@@ -1,0 +1,14 @@
+# flutter_test 配置。
+#
+# `golden` 标签把**像素级**基线测试圈出来，让 CI 与本地跑法可以分开：
+#
+# - 本地全量（`flutter test`）：golden 照跑。基线是 macOS + 中文系统字体下
+#   录的，换机器/换字体就会漂——那正是需要人看一眼的信号。
+# - CI（`flutter test --exclude-tags golden`）：跳过。Linux runner 的字形整形、
+#   抗锯齿与本机不同，golden 必然红；一个长期红的检查等于没有检查。
+#
+# 改 UI 之后本地跑全量，若只有 golden 红且差分是纯渲染位移，按仓库文档里的
+# 判据确认是环境性漂移再决定是否 `--update-goldens`。
+tags:
+  golden:
+    description: Pixel-exact baselines; environment-sensitive, run locally only.

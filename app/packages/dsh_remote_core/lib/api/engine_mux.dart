@@ -194,11 +194,22 @@ class MuxStream {
 
   /// Test seam: a logical stream fed straight from a Dart stream, with no
   /// socket underneath. Sending and cancelling are no-ops.
-  MuxStream.forTesting(Stream<Object?> source)
+  ///
+  /// [errors] is the sibling seam: the Host also delivers per-stream failures
+  /// on its own channel (`{type:'error',error:{code,message,details}}`), and
+  /// a consumer that only tolerates one error *type* is indistinguishable from
+  /// one that never received an error at all. The jobs list was exactly that
+  /// shape for a release: `EngineRemoteError` was handled, `MuxStreamError`
+  /// was dropped, and a stream that failed while opening left the screen
+  /// spinning forever (2026-10-11 真机两轮实证). Nothing could catch it while
+  /// this constructor could not deliver an `MuxStreamError` at all.
+  MuxStream.forTesting(Stream<Object?> source, {Stream<MuxStreamError>? errors})
       : _mux = null,
         streamId = 'test',
         endpoint = '' {
     _items.addStream(source);
+    final errorSource = errors;
+    if (errorSource != null) _errors.addStream(errorSource);
   }
 
   final EngineMux? _mux;

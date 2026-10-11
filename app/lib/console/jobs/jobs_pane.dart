@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:dsh_remote_core/api/engine_gateway.dart';
 import 'package:dsh_remote_core/api/error_code.dart';
 import 'package:dsh_remote_core/api/engine_models.dart';
+import 'package:dsh_remote_core/api/engine_mux.dart';
 import 'package:dsh_remote_core/api/engine_rpc.dart';
 import 'package:dsh_remote_app/l10n/generated/app_localizations.dart';
 import 'package:dsh_remote_app/ui/theme.dart';
@@ -46,11 +49,13 @@ class _JobsPaneState extends State<JobsPane> {
 
   void _subscribe() {
     final stream = widget.gateway.listJobs(sessionId: widget.sessionId);
-    stream.items.listen((value) {
+    _itemsSub = stream.items.listen((value) {
       if (!mounted) return;
       final frame = asObject(value);
       if (frame?['type'] != 'rows') return;
       final rows = frame!['jobs'];
+      _deadlineTimer?.cancel();
+      _deadlineTimer = null;
       setState(() {
         _loading = false;
         _error = null;
@@ -59,13 +64,56 @@ class _JobsPaneState extends State<JobsPane> {
             : const [];
       });
     });
-    stream.errors.listen((Object e) {
-      if (!mounted || e is! EngineRemoteError) return;
+    // D-089：这一行原来长成 `if (!mounted || e is! EngineRemoteError) return;`，
+    // 于是**唯一会让 job/list 停摆的那种错误反而被丢弃**——流带着错误结束、
+    // 页面永远停在转圈。2026-10-11 真机两轮（9:18/9:39）就是这个症状：引擎
+    // 直连探针秒回 `rows: []`，App 却一直转。
+    //
+    // 现在的口径：**任何**流错误都要落到界面上。`MuxStreamError` 自带
+    // `toAppError()`（走全局同一张错误码表），不需要在这里另开映射。
+    _errorsSub = stream.errors.listen((Object e) {
+      if (!mounted) return;
+      _deadlineTimer?.cancel();
+      _deadlineTimer = null;
       setState(() {
         _loading = false;
-        _error = e.toAppError();
+        _error = switch (e) {
+          final MuxStreamError err => err.toAppError(),
+          final EngineRemoteError err => err.toAppError(),
+          _ => const AppError(ErrorCode.engineUnknown),
+        };
       });
     });
+    // 首帧看门狗：引擎的 job/list **开流即 yield rows**（连空数组也算，
+    // 见 job-controller 的 rows.js），所以「一直没有第一帧」只可能是链路断了。
+    // 没有这个闸，一次断线就是一个永远转圈的页面。
+    _deadlineTimer = Timer(_firstFrameDeadline, () {
+      if (!mounted || !_loading) return;
+      final l10n = L10n.of(context);
+      setState(() {
+        _loading = false;
+        _error = AppError(
+          ErrorCode.engineUnknown,
+          detail: l10n.jobsNoFirstFrame,
+        );
+      });
+    });
+  }
+
+  /// 首帧闸。取 12s：引擎本地秒回，跨 VPS 隧道留给 TLS 握手与重连退避的余量
+  /// 也远小于这个数——真机上「一直转」比「等 12s 后看到错误」糟糕得多。
+  static const _firstFrameDeadline = Duration(seconds: 12);
+
+  StreamSubscription<Object?>? _itemsSub;
+  StreamSubscription<Object>? _errorsSub;
+  Timer? _deadlineTimer;
+
+  @override
+  void dispose() {
+    _itemsSub?.cancel();
+    _errorsSub?.cancel();
+    _deadlineTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _kill(JobView job) async {

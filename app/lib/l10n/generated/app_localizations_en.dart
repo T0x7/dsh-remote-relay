@@ -907,6 +907,10 @@ class L10nEn extends L10n {
   String get jobsKillRequested => 'Kill requested';
 
   @override
+  String get jobsNoFirstFrame =>
+      'The job list never sent its first frame (engine did not answer)';
+
+  @override
   String get jobsAlreadyFinished => 'That job had already finished';
 
   @override

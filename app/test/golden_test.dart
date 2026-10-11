@@ -1,3 +1,6 @@
+@Tags(['golden'])
+library;
+
 import 'package:dsh_remote_app/data/machines_repository.dart';
 import 'package:dsh_remote_app/data/settings_store.dart';
 import 'package:dsh_remote_app/main.dart';

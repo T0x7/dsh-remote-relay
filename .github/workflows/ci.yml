@@ -53,6 +53,41 @@ jobs:
         # runs in the dsh integration repository.
         run: pnpm --filter dsh-remote-relay-plugin test
 
+  app:
+    name: app (flutter analyze + UI 巡检 + widget tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          # 与开发机一致：同一个 Flutter 版本的生成件（l10n）与渲染行为才
+          # 可比。写一个「大概能用」的旧版本，只会让 CI 的失败原因变成
+          # 「版本不对」而不是真正的回归。
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # 排版/i18n 这类「没人会主动去看」的规则必须由 CI 强制，否则它们会慢慢
+      # 失效：每一次顺手改坏的排版都要有人拦。
+      - name: Analyze
+        run: flutter analyze
+      # core 集成测试必须逐文件跑（多文件同跑会随机挂死，见
+      # packages/dsh_remote_core 下的 README 注释），所以单独一步。
+      - name: Core API contract tests
+        run: flutter test packages/dsh_remote_core/test/api
+      # UI 巡检单独点名跑一次：它是「所有界面 × 所有状态 × 所有子表面」的
+      # 覆盖面清单（app/test/ui_sweep/）。在全量输出里它会被淹没，单独跑
+      # 才能在 CI 日志里一眼看到覆盖面。
+      - name: UI 巡检（清单驱动 + 排版规则 + 行为回归）
+        run: flutter test test/ui_sweep
+      # golden 用 `--exclude-tags`（见 app/dart_test.yaml）：像素基线在 Linux
+      # runner 上必然漂，长期红的检查等于没有检查。
+      - name: Widget tests
+        run: flutter test --exclude-tags golden
+
   secrets:
     name: no secrets or private hosts committed
     runs-on: ubuntu-latest

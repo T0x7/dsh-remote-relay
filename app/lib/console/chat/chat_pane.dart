@@ -125,15 +125,40 @@ class _ChatPaneState extends State<ChatPane>
     }
   }
 
-  void _scrollToEnd() {
+  /// D-090: 滚到底部。
+  ///
+  /// 不能只 `animateTo(maxScrollExtent)` 一次就完事：**懒加载 ListView 的
+  /// `maxScrollExtent` 是估算值**，列表里只要有一个超过视口高度的展开气泡
+  /// （比如「展开全文」点开后的长文），估算就和真实布局差出好一屏。实测两次：
+  /// 一次落进纯空白区（视口里什么都没有），一次停在距底一屏处而「回到底部」
+  /// 按钮还亮着——两种都表现为「点了没反应」。
+  ///
+  /// 所以动画结束后重查一次真实落点，没到底就再跳一次。跳的次数有界
+  /// （[_maxBottomNudges]）：布局真的对不上时无限跳会把页面变成抽搐。
+  void _scrollToEnd({int nudge = 0}) {
     if (!_scroll.hasClients) return;
     _followBottom = true;
+    if (nudge >= _maxBottomNudges) return;
     _scroll.animateTo(
       _scroll.position.maxScrollExtent,
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOut,
-    );
+    ).whenComplete(() {
+      if (!mounted || !_followBottom || !_scroll.hasClients) return;
+      final position = _scroll.position;
+      // 阈值沿用贴底判定：已经算「在底部」就不必再纠。
+      final atBottom =
+          position.pixels >= position.maxScrollExtent - _followThreshold;
+      if (atBottom) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _scrollToEnd(nudge: nudge + 1);
+      });
+    });
   }
+
+  /// 回底的补跳上限。两次足够覆盖「估算偏一屏」；再多就是布局有病。
+  static const _maxBottomNudges = 2;
 
   Future<void> _send() async {
     final text = _composer.text;

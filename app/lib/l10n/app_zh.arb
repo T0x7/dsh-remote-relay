@@ -271,6 +271,7 @@
   "jobsKill": "终止",
   "jobsKillRequested": "已请求终止",
   "jobsAlreadyFinished": "该任务已经结束了",
+  "jobsNoFirstFrame": "任务列表没有回第一帧（引擎未响应）",
 
   "hostSessions": "会话数",
   "hostModel": "当前模型",
