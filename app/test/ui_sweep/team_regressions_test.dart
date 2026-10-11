@@ -424,4 +424,51 @@ void main() {
           reason: '快照里的工具调用必须直接出现在轨迹页上');
     });
   });
+
+  group('工作区新建会话 · 端到端（combined 方案的接线）', () {
+    testWidgets('ConsolePage 新会话：registry 快照进面板，choice 传给 createSession',
+        (tester) async {
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final gateway = FakeEngineGateway(sessions: [
+        SessionSummary(
+          sessionId: 'job-weekly',
+          updatedAt: 1,
+          running: false,
+          blank: false,
+          agentAvailable: true,
+        ),
+      ]);
+      addTearDown(gateway.dispose);
+
+      await tester.pumpWidget(_host(
+        ConsolePage(store: _seededStore(), gatewayFactory: (_) => gateway),
+      ));
+      await settle(tester, steps: 16);
+
+      // 顶栏「新会话」→ 预设面板。registry 的默认基线带 w-jobs/w-workspace
+      // 两个工作区，面板应显示工作区段。
+      await tester.tap(find.byIcon(Icons.add_comment_outlined));
+      await settle(tester, steps: 10);
+      expect(find.text('在哪个工作区打开'), findsOneWidget,
+          reason: 'ConsolePage 必须把 registry 快照交给面板——这是接线的关键一跳');
+
+      // 选 w-jobs + Alpha Radar。
+      await tester.tap(find.text('定时任务'));
+      await settle(tester, steps: 4);
+      await tester.tap(find.text('Alpha Radar'));
+      await settle(tester, steps: 8);
+
+      final creates = gateway.calls
+          .where((c) => c.call == 'createSession')
+          .toList(growable: false);
+      expect(creates, hasLength(1));
+      final args = creates.single.args as Map<String, dynamic>;
+      expect(args['workspaceId'], 'w-jobs',
+          reason: '面板选的工作区必须落到 session/create 的 wire 参数上');
+      expect(args['agentPreset'], 'alpha-radar');
+      expect(args['cwd'], isNull, reason: 'workspaceId 与 cwd 互斥（引擎契约）');
+    });
+  });
 }

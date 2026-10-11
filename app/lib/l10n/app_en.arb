@@ -369,6 +369,8 @@
   "chatToolArgs": "Arguments",
   "chatToolResult": "Result",
   "presetsSheetTitle": "Pick an agent preset",
+  "presetsWorkspaceSection": "Where to open it",
+  "presetsWorkspaceDefault": "Engine default",
   "presetsQuickCreate": "New session (default preset)",
   "presetsDefaultChip": "default",
   "presetsBrokenChip": "broken config",

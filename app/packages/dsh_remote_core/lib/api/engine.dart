@@ -75,17 +75,22 @@ class EngineClient implements EngineGateway {
   ///
   /// `workspaceId` and `cwd` are mutually exclusive; passing both is a
   /// `gateway/bad-request` (`commands.ts:106-108`), so this surfaces only
-  /// [cwd] (or an explicit session id for idempotent re-claim).
+  /// [cwd] (or an explicit session id for idempotent re-claim). Prefer
+  /// [workspaceId]: the engine resolves it through the registry (unknown id →
+  /// `workspace/not-found`) and attaches the session to the workspace group;
+  /// a raw [cwd] is used as-is and never enters the registry's grouping.
   @override
   Future<EngineRpcResult> createSession({
     String? cwd,
     String? sessionId,
     String? agentPreset,
+    String? workspaceId,
   }) async {
     final result = await rpc.call(SessionEndpoints.create, args: {'request': {
       if (cwd != null) 'cwd': cwd,
       if (sessionId != null) 'sessionId': sessionId,
       if (agentPreset != null) 'agentPreset': agentPreset,
+      if (workspaceId != null) 'workspaceId': workspaceId,
     }});
     return _mapValue(result, (value) => asObject(value) ?? const <String, dynamic>{});
   }

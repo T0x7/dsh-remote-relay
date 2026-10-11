@@ -1070,6 +1070,12 @@ class L10nZh extends L10n {
   String get presetsSheetTitle => '选择 Agent 预设';
 
   @override
+  String get presetsWorkspaceSection => '在哪个工作区打开';
+
+  @override
+  String get presetsWorkspaceDefault => '引擎默认';
+
+  @override
   String get presetsQuickCreate => '直接新建（默认预设）';
 
   @override

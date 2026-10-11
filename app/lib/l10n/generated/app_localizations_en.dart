@@ -1133,6 +1133,12 @@ class L10nEn extends L10n {
   String get presetsSheetTitle => 'Pick an agent preset';
 
   @override
+  String get presetsWorkspaceSection => 'Where to open it';
+
+  @override
+  String get presetsWorkspaceDefault => 'Engine default';
+
+  @override
   String get presetsQuickCreate => 'New session (default preset)';
 
   @override

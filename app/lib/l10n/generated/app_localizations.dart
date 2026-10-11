@@ -2053,6 +2053,18 @@ abstract class L10n {
   /// **'Pick an agent preset'**
   String get presetsSheetTitle;
 
+  /// No description provided for @presetsWorkspaceSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Where to open it'**
+  String get presetsWorkspaceSection;
+
+  /// No description provided for @presetsWorkspaceDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Engine default'**
+  String get presetsWorkspaceDefault;
+
   /// No description provided for @presetsQuickCreate.
   ///
   /// In en, this message translates to:

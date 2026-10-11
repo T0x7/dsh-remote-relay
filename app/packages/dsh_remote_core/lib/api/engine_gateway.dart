@@ -25,6 +25,7 @@ abstract interface class EngineGateway {
     String? cwd,
     String? sessionId,
     String? agentPreset,
+    String? workspaceId,
   });
 
   /// D-073: agent 预设目录（新建会话时选择「由哪种 agent 处理」）。

@@ -28,6 +28,7 @@ import 'workspace/workspace_pane.dart';
 import 'chat/chat_pane.dart';
 import 'workspaces/workspace_picker_page.dart';
 import 'workspaces/workspace_registry_controller.dart';
+import 'package:dsh_remote_core/api/workspace_registry.dart';
 import 'team/team_page.dart';
 
 /// The console tab (mockup 屏 E): machine context, the chat / tasks / host
@@ -315,10 +316,26 @@ class _ConsolePageState extends State<ConsolePage> {
     if (chat == null) return;
     // D-073: 第一跳选 agent 预设（null = 关闭面板放弃；'' = 直接新建走
     // 引擎默认）。快路径「直接新建」保持在面板第一颗，默认建会话只多一击。
-    final preset = await showAgentPresetSheet(context, chat.gateway);
-    if (preset == null || !mounted) return;
-    final result = await chat.gateway
-        .createSession(agentPreset: preset.isEmpty ? null : preset);
+    //
+    // 工作区选择（combined 方案）：registry 当前快照一并交给面板；选择
+    // 「引擎默认」时 workspaceId 为 null，wire 上与功能上线前完全一致。
+    // registry 尚未就绪（error/未 loaded）时传空列表，面板退化为纯预设
+    // 选择——新建会话永远可用，不因分组数据缺席而不可用。
+    final registry = _registry;
+    final workspaces =
+        (registry != null && registry.loaded && registry.error == null)
+            ? registry.workspaces
+            : const <WorkspaceView>[];
+    final choice = await showAgentPresetSheet(
+      context,
+      chat.gateway,
+      workspaces: workspaces,
+    );
+    if (choice == null || !mounted) return;
+    final result = await chat.gateway.createSession(
+      agentPreset: choice.preset.isEmpty ? null : choice.preset,
+      workspaceId: choice.workspaceId,
+    );
     if (!result.isOk || !mounted) return;
     final sessionId = (result.value! as Map<String, dynamic>)['sessionId'] as String?;
     if (sessionId != null) {

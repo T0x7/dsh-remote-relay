@@ -249,11 +249,13 @@ class FakeEngineGateway implements EngineGateway {
     String? cwd,
     String? sessionId,
     String? agentPreset,
+    String? workspaceId,
   }) async {
     calls.add((call: 'createSession', args: {
       'cwd': cwd,
       'sessionId': sessionId,
       'agentPreset': agentPreset,
+      'workspaceId': workspaceId,
     }));
     return EngineRpcResult.ok({'sessionId': sessionId ?? 'session-new'});
   }

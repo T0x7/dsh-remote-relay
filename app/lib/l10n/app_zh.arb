@@ -369,6 +369,8 @@
   "chatToolArgs": "调用参数",
   "chatToolResult": "运行结果",
   "presetsSheetTitle": "选择 Agent 预设",
+  "presetsWorkspaceSection": "在哪个工作区打开",
+  "presetsWorkspaceDefault": "引擎默认",
   "presetsQuickCreate": "直接新建（默认预设）",
   "presetsDefaultChip": "默认",
   "presetsBrokenChip": "配置损坏",
