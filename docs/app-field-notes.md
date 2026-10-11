@@ -1,4 +1,4 @@
-# App 端实测踩坑与修复（D-067 ~ D-101）
+# App 端实测踩坑与修复（D-067 ~ D-102）
 
 > 这份文档记录 **Flutter App 在真机上暴露的问题、根因与修复**。每条都是先
 > 实锤根因、再写红测试、最后真机复验的闭环——多数坑的共同点是「看起来是
@@ -252,6 +252,51 @@ D-100（看门狗无出口）；D-094（open 丢 parent）→ D-099（resume 丢
 **修任何「监听缺失 / 错误出口缺失 / 寻址参数缺失」时，必须 grep 全仓同类消费
 端一次做完**，否则每一处都要等下一次真机走查来暴露。
 
+### 6.8 第三轮走查追加：点回底钮之后手势锁死（D-102）
+
+同日 19:5x，全量走查第三轮。在子会话的对话页点过「回到底部」之后，
+**整条列表的手势彻底失灵**：滑动无反应、再点回底也没用；切到别的 tab 再切回来
+立刻恢复。App 进程 CPU 3.4%（不是忙循环）、无 ANR、logcat 无 flutter 异常、
+tab 切换正常（UI 树活着，只有对话页手势死）。Stack 里也没有透明全屏 widget
+吃手势。
+
+#### 病根：自动贴底与用户手势抢同一条滚动位置
+
+两处代码在**密集事件流**下互相打架（后台恢复重放、投影刷新正是这种形态，
+每帧一次 controller notify）：
+
+1. **贴底开关靠 ±80px 阈值判断「用户是不是想翻历史」**，而阈值判定发生在手势
+   开始**之后**。手指刚落上列表还没滑出 80px 时，跟随仍是开的 → notify 里
+   的 postFrame `jumpTo(maxScrollExtent)` 落在手势中途，直接把 drag 打断；
+2. **回底用 `animateTo` + 递归补跳**（D-090 为治「落进空白区」加的）。动画是一条
+   有状态的 activity：被 jumpTo 打断后 `whenComplete` 立刻排下一次 animate，
+   动画状态机自己跟自己打转，把用户手势一起绞死。
+
+#### 修法（三处）
+
+- `ScrollStartNotification(dragDetails != null)` 一到就置 `_dragging=true` 并
+  强制 `_followBottom=false` —— **手势期间自动贴底闭嘴**，postFrame 跳底加
+  `|| _dragging` 守卫；
+- `_scrollToEnd` 改**同步 `jumpTo`**（D-090 的懒加载估算问题用 postFrame 有界
+  重查兜住），没有 activity 可抢；
+- 贴底开关收口到 `_setFollowBottom`，回底钮是用户唯一的逃生出口。
+
+**守门写第一版时踩了自己的坑**：一开始的用例只断言「离底距离」，结果在旧代码
+上也是绿的——两条原因叠加，① 往**已有**气泡追加内容根本不会让懒加载 ListView 的
+`maxScrollExtent` 增长；② `applyFrame` 的通知被 **48ms 的 stream-paint 合并定时器**
+延后，测试只 `pump()` 零时长时通知压根没落地。最后钉成「手指往下拖 pixels 只许
+变小、不许变大 + 必须 `pump` 推进时钟」。**回退即红验证**：两条用例在旧代码上
+都真的红了。
+
+**过程中还抓到一个自己引入的缺陷**（测试逼出来的，不是想出来的）：`_dragging`
+也参与回底钮显隐判定，抬手时若 `_followBottom` 早已是 false，`_setFollowBottom`
+不会再 setState，按钮就**永久停在隐藏态**——用户列表失灵时连逃生出口都没了。
+ScrollEnd 分支补一次强制重画。
+
+**复验**（20:5x，小米）：拖动 → 回底钮出现 → 点它一次到底（同步跳）→ **立刻**
+再滑，列表正常响应、回底钮重新出现；连做三轮「点回底 + 上下滑」仍无锁死，
+logcat 无 flutter 异常。
+
 ---
 
 ## 7. 环境陷阱速查
@@ -266,6 +311,8 @@ D-100（看门狗无出口）；D-094（open 丢 parent）→ D-099（resume 丢
 | `adb input swipe` 太快 | 150ms 快甩被系统当误触丢弃、页面纹丝不动 | 用 ≥350ms；否则会误判成「列表卡住」 |
 | VM service 的 `debugPaintBaselinesEnabled` | 截图里**每段文字下都有两条亮黄线**，看起来像样式炸了 | 文字本身的颜色/字号是对的，黄线是 baseline 调试层；重启 App 进程即消失 |
 | 引擎直连好 ≠ 手机端好 | curl `127.0.0.1:3080/api/…` 与 WS mux 秒回，手机同一端点却无响应 | 手机走的是 `https://relay.example.com`（VPS）→ 插件隧道 → 引擎；先确认 `GET /dsh-remote/session` 里的 `tunnel.relayUrl`，别在引擎侧空查 |
+| `applyFrame` 的通知被 48ms 合并定时器延后 | widget 测试里 `pump()` 零时长后断言「UI 应该更新了」——其实通知还没发出，守门一片假绿 | 推时钟：`pump(100ms)`；`ChatController._scheduleStreamPaint` |
+| 懒加载 ListView 的 `maxScrollExtent` 对「往已有气泡追加内容」不增长 | 拿 `pixels` 与 `maxScrollExtent` 的差值当断言基准会踩到边界/空断言 | 用**不变量**断言（手势往下拖 pixels 只许变小）；要真让列表变高得推**新 durable 记录**（新 item）|
 | 中继 URL 会话凭据不可外借 | 拿插件 `active` 那条会话的 qrUrl/hash 去 `wss://` 握手，一律 401 | 设备侧 bearer 是 `<sid>.<expMs>.<mid>.<t>.<hash>`，且必须已被**那台 VPS 中继**认识；换会话号就换一套凭据 |
 
 ## 8. 已知引擎侧问题（不在本仓，需引擎修）

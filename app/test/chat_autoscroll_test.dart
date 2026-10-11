@@ -52,7 +52,11 @@ FollowSnapshot _snapshot({
 FollowAssistantStream _frame(Map<String, Object?> json) =>
     FollowAssistantStream(json);
 
-Future<ChatController> _openConsole(
+/// 测试台：controller + gateway 一起交出。D-102 需要在「手指按住」期间往
+/// 事件流里灌新记录，所以用例得自己能 pushFrame。
+typedef _ChatHarness = ({ChatController controller, FakeEngineGateway gateway});
+
+Future<_ChatHarness> _openConsole(
   WidgetTester tester, {
   String sessionId = 'session-1',
   List<FollowEvent> records = const [],
@@ -70,7 +74,7 @@ Future<ChatController> _openConsole(
   gateway.pushFrame(_snapshot(id: sessionId, records: records));
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 300));
-  return controller;
+  return (controller: controller, gateway: gateway);
 }
 
 ScrollPosition _listPosition(WidgetTester tester) =>
@@ -90,10 +94,44 @@ void _delta(ChatController controller, int revision, String text) =>
       'chunk': {'type': 'text-delta', 'text': text},
     }));
 
+void _beginTurn(ChatController controller) => controller.applyFrame(_frame({
+  'type': 'start',
+  'attemptId': 'att-1',
+  'revision': 1,
+  'index': 0,
+  'turn': 1,
+  'step': 1,
+}));
+
+/// 造一份远超视口的内容并进入「贴底跟随」态——D-102 的前置条件。
+Future<void> _pumpStickyBottom(
+    WidgetTester tester, ChatController controller) async {
+  _beginTurn(controller);
+  _delta(controller, 2, '输出' * 2500);
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 300));
+  final p = _listPosition(tester);
+  expect(p.pixels, greaterThan(p.maxScrollExtent - 4),
+      reason: '前置条件：此刻应处于贴底跟随态');
+}
+
+/// 手指按住列表拖一段但**还没抬手**。
+Future<TestGesture> _dragHeld(
+    WidgetTester tester, {List<Offset> moves = const [Offset(0, 200)]}) async {
+  final gesture =
+      await tester.startGesture(tester.getCenter(find.byType(ListView)));
+  for (final move in moves) {
+    await gesture.moveBy(move);
+    await tester.pump();
+  }
+  return gesture;
+}
+
 void main() {
   testWidgets('流式输出增长时贴底跟随：视口始终钉在最新内容', (tester) async {
-    final controller = await _openConsole(
+    final harness = await _openConsole(
         tester, records: [FollowEvent(_userMessage(1, '开始输出'))]);
+    final controller = harness.controller;
     controller.applyFrame(_frame({
       'type': 'start',
       'attemptId': 'att-1',
@@ -120,8 +158,9 @@ void main() {
   });
 
   testWidgets('用户上滚看历史：不被拽回，悬浮钮出现，点它回底', (tester) async {
-    final controller = await _openConsole(
+    final harness = await _openConsole(
         tester, records: [FollowEvent(_userMessage(1, '开始输出'))]);
+    final controller = harness.controller;
     controller.applyFrame(_frame({
       'type': 'start',
       'attemptId': 'att-1',
@@ -160,5 +199,124 @@ void main() {
     final back = _listPosition(tester);
     expect(back.pixels, greaterThan(back.maxScrollExtent - 4));
     expect(find.byKey(const ValueKey('scroll-to-bottom')), findsNothing);
+  });
+
+  /// D-102：手指按住列表时的密集事件流不得把滚动位置抢回去。
+  ///
+  /// 真机症状（小米，子会话）：点过「回到底部」之后对话列表**手势彻底失灵**
+  /// ——滑动无反应、再点回底也没用，切走 tab 再切回来立刻恢复；进程 CPU 3.4%
+  /// （非忙循环）、无 ANR、logcat 无 flutter 异常、tab 切换正常。
+  ///
+  /// 病根是「自动贴底」与「用户手势」抢同一条滚动位置：贴底开关原先靠 ±80px
+  /// 阈值判断，而阈值判定发生在手势开始**之后**；密集事件流（后台恢复重放、
+  /// 投影刷新就是这种形态）在那几帧里每帧一次 postFrame `jumpTo`，落在手势
+  /// 中途就把 drag 打断。回底那阵又叠加 `animateTo` 的递归补跳——动画被打
+  /// 断后 `whenComplete` 立刻排下一次 animate，状态机自己跟自己打转。
+  ///
+  /// 修法：用户手势一落上列表就让自动贴底闭嘴（`_dragging`），回底改同步
+  /// `jumpTo`，没有 activity 可抢。
+  testWidgets('D-102 手势进行中：密集事件流不得把列表拽回底部', (tester) async {
+    final harness = await _openConsole(
+        tester, records: [FollowEvent(_userMessage(1, '开始输出'))]);
+    final controller = harness.controller;
+    await _pumpStickyBottom(tester, controller);
+
+    // 手指按下往上拖一点点（**手指还按着**）。注意这里只拖 60px：仍在 ±80px
+    // 的贴底阈值内——这正是旧逻辑的盲区，它只能看到「滑完之后还在不在底部」，
+    // 看不到「此刻有人正按着列表」。
+    final gesture = await _dragHeld(tester, moves: const [Offset(0, 60)]);
+    final held = _listPosition(tester);
+    expect(held.pixels, lessThan(held.maxScrollExtent - 1),
+        reason: '前置条件：drag 应该真的把列表推开一点');
+
+    // 手指还按着，事件流密集到来——后台恢复重放/投影刷新就是这种形态。
+    for (var i = 0; i < 8; i++) {
+      _delta(controller, 3 + i, '追加' * 800);
+    }
+    // 必须推进时钟：`applyFrame` 的通知被 48ms 的 stream-paint 合并定时器
+    // 延后（`ChatController._scheduleStreamPaint`）。只 pump() 零时长的���，通知
+    // 压根没落地，守门就成了摆设——这一条曾经把假绿放过去。
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final afterEvents = _listPosition(tester);
+    // 手指往上拖，pixels 只会变小；自动贴底只会把它**往上**拽回
+    // maxScrollExtent。「不许变大」正是这条守门的全部要害。
+    expect(afterEvents.pixels, lessThanOrEqualTo(held.pixels + 1),
+        reason: '手势进行中不得被自动跳底：手指说了算（修复前这里被每帧的 '
+            'postFrame jumpTo 拽回 maxScrollExtent）');
+    expect(find.byKey(const ValueKey('scroll-to-bottom')), findsNothing,
+        reason: '手势进行中不给回底钮（拇指底下，还可能被同一次手势误命中）');
+
+    // 拖成真正的历史区再抬手：回底钮该出现，点它还能回底——这条路径是用户
+    // 在「列表没反应」时的唯一逃生出口，必须一直是通的。
+    await gesture.moveBy(const Offset(0, 400));
+    await gesture.up();
+    // 冲一次时钟：stream-paint 的 48ms 定时器不清掉，testWidgets 会报
+    // "A Timer is still pending"。
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final settled = _listPosition(tester);
+    expect(settled.pixels, lessThan(settled.maxScrollExtent - 80),
+        reason: '松手后仍留在历史区，不得被弹回底部');
+    expect(find.byKey(const ValueKey('scroll-to-bottom')), findsOneWidget,
+        reason: '离底后应给出回底钮');
+
+    await tester.tap(find.byKey(const ValueKey('scroll-to-bottom')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final back = _listPosition(tester);
+    expect(back.pixels, greaterThan(back.maxScrollExtent - 80),
+        reason: '回底必须一次到位');
+  });
+
+  /// D-102 续：真机上「点回底也没用」的那一步。回底必须**同步一次到位**
+  /// （修复前是 220ms `animateTo`：被事件流打断 → `whenComplete` 重排下一次
+  /// 动画，状态机自己跟自己打转），且回底之后紧接着的新手势必须立即生效。
+  testWidgets('D-102 点回底之后：新手势立即生效，事件流也抢不走', (tester) async {
+    final harness = await _openConsole(
+        tester, records: [FollowEvent(_userMessage(1, '开始输出'))]);
+    final controller = harness.controller;
+    await _pumpStickyBottom(tester, controller);
+
+    // 先离底，才能有回底钮可点。
+    await tester.drag(find.byType(ListView), const Offset(0, 600));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byKey(const ValueKey('scroll-to-bottom')), findsOneWidget);
+
+    // 事件流仍在密集到来时点回底。
+    for (var i = 0; i < 5; i++) {
+      _delta(controller, 3 + i, '追加' * 800);
+    }
+    await tester.tap(find.byKey(const ValueKey('scroll-to-bottom')));
+    // 只过一帧、**不推进动画时长**：同步 jumpTo 必须已经到底（修复前是
+    // 220ms animateTo，此刻几乎还在起点）。
+    await tester.pump();
+    final bottom = _listPosition(tester);
+    expect(bottom.pixels, greaterThan(bottom.maxScrollExtent - 80),
+        reason: '回底必须一次到位，不能依赖一段可被打断的动画');
+    expect(find.byKey(const ValueKey('scroll-to-bottom')), findsNothing,
+        reason: '回底后恢复跟随，按钮应当消失');
+
+    // 紧接着的新手势：轻轻上移 60px（仍在贴底阈值内）探一眼历史，同时事件
+    // 流继续到达。修复前这一档会被判定成「还在底部」而重新开启跟随。
+    final gesture =
+        await tester.startGesture(tester.getCenter(find.byType(ListView)));
+    await gesture.moveBy(const Offset(0, 60));
+    await tester.pump();
+    final peeked = _listPosition(tester).pixels;
+
+    for (var i = 0; i < 6; i++) {
+      _delta(controller, 20 + i, '再追加' * 800);
+    }
+    await tester.pump();
+    // 同样必须推进时钟，让 48ms 的 stream-paint 定时器把通知放出来。
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(_listPosition(tester).pixels, lessThanOrEqualTo(peeked + 1),
+        reason: '新手势进行中不得被拽回底部（真机症状：列表整体手势失灵）');
+    await gesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
   });
 }

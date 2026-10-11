@@ -266,3 +266,42 @@ CI 的失败原因会变成「版本不对」而不是真正的回归。
 测试侧新坑（下次直接绕开）：`testWidgets` 的 FakeAsync 区里
 **`await Future.delayed(Duration.zero)` 会把测试吊死**（真实定时器永不触发）；
 纯 `test()` 里同句没问题。等流事件用 `tester.pump` 有界推进。
+## 11. 追加：第三轮走查（同日晚，D-102）
+
+**现象**：子会话对话页点过「回到底部」之后整条列表手势锁死（滑动无反应、再点回底
+也没用，切 tab 回来即恢复）。CPU 3.4%、无 ANR、logcat 无 flutter 异常——第一次
+遇到「无异常、无日志、纯手感死」的缺陷。
+
+**病根**（`chat_pane.dart`）：自动贴底与用户手势抢同一条滚动位置。
+
+| 环节 | 旧写法 | 后果 |
+|---|---|---|
+| 贴底开关 | 靠 ±80px 阈值**事后**判断 | 手指刚落上列表（滑出不足 80px）时跟随仍开着 |
+| 自动贴底 | 每次 notify postFrame `jumpTo(max)` | 密集事件流下落在手势中途，打断 drag |
+| 回底 | `animateTo` + 递归补跳 | 被 jumpTo 打断 → `whenComplete` 立刻重排 → 状态机自转 |
+
+**修法**：手势开始即 `_dragging`（`ScrollStartNotification(dragDetails != null)`）
+并强制退出跟随、postFrame 跳底加 `_dragging` 守卫、回底改同步 `jumpTo`
+（D-090 的懒加载估算问题由 postFrame 有界重查兜住）、回底钮在手势中不显示。
+
+守门：`app/test/chat_autoscroll_test.dart` 2 例（app 全量 447 → 449）。
+
+### 这一轮最值钱的收获：假绿的两种形状
+
+第一版守门在旧代码上也是绿的。两条原因都是「fixture 与真实机制不符」：
+
+1. **往已有气泡追加内容不会让懒加载 ListView 的 `maxScrollExtent` 增长** → 拿
+   「离底距离」当断言基准是空断言。改成**不变量**断言：手指往下拖 pixels 只许
+   变小（自动贴底只会把它往上拽）。要真让列表变高，得推**新 durable 记录**
+   （= 新 item）。
+2. **`ChatController._scheduleStreamPaint` 把 notify 延后 48ms** → 测试只
+   `pump()` 零时长时通知根本没发出，「UI 应该更新了」的断言全是摆设。
+   **凡是等异步通知的断言，一律 `pump(100ms)` 推进时钟。**
+
+补一句：`_dragging` 一旦也参与按钮显隐，抬手时就必须强制重画——否则
+`_followBottom` 已是 false 时 `_setFollowBottom` 不会 setState，回底钮永久停在
+「手势中」的隐藏态，**用户在列表失灵时连逃生出口都没了**。这个缺陷是测试逼出来
+的，不是读代码想出来的。
+
+纪律复述：**修完必做「回退即红」**——把修复改回旧写法跑一遍，守门必须红；
+本轮第一次回退验证就暴露了「守门根本没咬住」。

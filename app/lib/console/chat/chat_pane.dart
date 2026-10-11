@@ -44,15 +44,54 @@ class _ChatPaneState extends State<ChatPane>
   /// 此时右下角给「回到底部」悬浮钮，点它或滑回底部即恢复跟随。
   bool _followBottom = true;
 
+  /// D-102: 手指正按在列表上（drag 已开始、尚未结束）。
+  ///
+  /// 自动贴底的每个 `jumpTo` 都是一次「抢占」——落在手势中途就把它打断。
+  /// 有了这个标志，手势期间一律不自动跳底，手指说了算。
+  bool _dragging = false;
+
   static const _followThreshold = 80.0;
 
   void _onScroll() {
     if (!_scroll.hasClients) return;
     final atBottom = _scroll.position.pixels >=
         _scroll.position.maxScrollExtent - _followThreshold;
-    if (atBottom != _followBottom) {
-      setState(() => _followBottom = atBottom);
+    // 手势进行中不接受「其实还在底部」把跟随抢回去：哪怕只滑了 3px，
+    // 一旦开了跟随，接下来每一帧的自动跳底都会跟手指对着干。
+    if (_dragging && atBottom) return;
+    _setFollowBottom(atBottom);
+  }
+
+  /// D-102: 用户手势一落上列表，自动贴底立即让位。
+  ///
+  /// 改之前是靠 [_onScroll] 的 ±80px 阈值判断「用户是不是想翻历史」，而阈值
+  /// 判定发生在手势开始**之后**——密集事件流（后台恢复重放、投影刷新）在
+  /// 这几帧里每次 notify 都 postFrame `jumpTo`，直接和进行中的 drag 抢滚动
+  /// 位置：手指不动、动画被反复取消重排，表现为「滑动完全失灵，点回底也没
+  /// 用」，切走 tab 再回来（widget 重建）才恢复。
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification is ScrollStartNotification &&
+        notification.dragDetails != null) {
+      _dragging = true;
+      _setFollowBottom(false);
+    } else if (notification is ScrollEndNotification) {
+      _dragging = false;
+      // 抬手时重新判一次：轻轻拖 3px 松手的人不该被留下一颗回底钮。
+      _onScroll();
+      // `_dragging` 本身参与按钮显隐判定（手势中不显示），所以清掉它必须
+      // 重画一次。此时 `_followBottom` 多半已经是 false，[_setFollowBottom]
+      // 不会触发 setState —— 少了这一句，回底钮就会永远停在「手势中」的
+      // 隐藏态，用户在列表失灵时连逃生出口都没有。
+      if (mounted) setState(() {});
     }
+    return false;
+  }
+
+  /// 贴底开关的唯一写入口，保证按钮显隐（依赖它）随之刷新。
+  void _setFollowBottom(bool value) {
+    if (_followBottom == value) return;
+    _followBottom = value;
+    if (mounted) setState(() {});
   }
 
   /// D-070: 被点开的工具行（按事件 seq）。同 _unfoldedSeqs 的理由：状态要
@@ -84,7 +123,10 @@ class _ChatPaneState extends State<ChatPane>
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onChanged);
       widget.controller.addListener(_onChanged);
+      // 换 controller = 换会话，直接复位；didUpdateWidget 之后必然有一次
+      // build，按钮显隐在这一帧就是对的，不必再 setState。
       _followBottom = true;
+      _dragging = false;
       _syncDots();
     }
   }
@@ -117,7 +159,9 @@ class _ChatPaneState extends State<ChatPane>
     if (_followBottom) {
       // 内容增长后布局才有新的 maxScrollExtent，延后一帧跳底。
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_followBottom || !_scroll.hasClients) return;
+        if (!mounted || !_followBottom || _dragging || !_scroll.hasClients) {
+          return;
+        }
         if (_scroll.position.maxScrollExtent > _scroll.position.pixels) {
           _scroll.jumpTo(_scroll.position.maxScrollExtent);
         }
@@ -133,27 +177,32 @@ class _ChatPaneState extends State<ChatPane>
   /// 一次落进纯空白区（视口里什么都没有），一次停在距底一屏处而「回到底部」
   /// 按钮还亮着——两种都表现为「点了没反应」。
   ///
-  /// 所以动画结束后重查一次真实落点，没到底就再跳一次。跳的次数有界
+  /// 所以布局稳定后再重查一次真实落点，没到底就再跳。跳的次数有界
   /// （[_maxBottomNudges]）：布局真的对不上时无限跳会把页面变成抽搐。
+  ///
+  /// D-102（改版）：**改用同步 `jumpTo`，不再用 `animateTo` 的递归补跳**。
+  /// 动画是一条有状态的 activity：密集事件流里每次 notify 打断它、
+  /// `whenComplete` 又立刻排下一次 animate，动画状态机自己跟自己打转，把
+  /// 用户手势一起绞死（真机表现：点过回底之后整条列表手势失灵）。同步跳
+  /// 没有 activity 可抢，补跳退化成一次 postFrame 重查。
   void _scrollToEnd({int nudge = 0}) {
+    // 点回底钮是用户明确要的落点：顺手清掉手势标志（万一上一次手势的
+    // ScrollEnd 没送达，这里是唯一可靠的逃生出口）。
+    _dragging = false;
+    _setFollowBottom(true);
     if (!_scroll.hasClients) return;
-    _followBottom = true;
+    final position = _scroll.position;
+    if (position.maxScrollExtent <= position.pixels) return;
+    _scroll.jumpTo(position.maxScrollExtent);
     if (nudge >= _maxBottomNudges) return;
-    _scroll.animateTo(
-      _scroll.position.maxScrollExtent,
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOut,
-    ).whenComplete(() {
-      if (!mounted || !_followBottom || !_scroll.hasClients) return;
-      final position = _scroll.position;
-      // 阈值沿用贴底判定：已经算「在底部」就不必再纠。
-      final atBottom =
-          position.pixels >= position.maxScrollExtent - _followThreshold;
-      if (atBottom) return;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_followBottom || _dragging || !_scroll.hasClients) {
+        return;
+      }
+      final next = _scroll.position;
+      if (next.maxScrollExtent > next.pixels) {
         _scrollToEnd(nudge: nudge + 1);
-      });
+      }
     });
   }
 
@@ -190,74 +239,81 @@ class _ChatPaneState extends State<ChatPane>
                 )
               : Stack(
                   children: [
-                    ListView.builder(
-                      controller: _scroll,
-                  padding: const EdgeInsets.fromLTRB(
-                      AppTheme.l, AppTheme.m, AppTheme.l, AppTheme.s),
-                  // D-071: 模型被请求但尚无任何可上屏输出时，列表末尾追加
-                  // 一颗「思考中」指示器——别让用户对着死寂猜卡没卡。
-                  itemCount: controller.bubbles.length +
-                      (controller.modelWorkingSilently ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index == controller.bubbles.length) {
-                      return _ThinkingIndicator(
-                        key: const ValueKey('thinking-indicator'),
-                        pulse: _dotsPulse,
-                        label: l10n.chatThinkingActive,
+                    // D-102: 挂在列表上而不是 ScrollController 上——只有
+                    // ScrollNotification 能分辨「手指拖的」和「代码跳的」。
+                    NotificationListener<ScrollNotification>(
+                      onNotification: _onScrollNotification,
+                      child: ListView.builder(
+                        controller: _scroll,
+                    padding: const EdgeInsets.fromLTRB(
+                        AppTheme.l, AppTheme.m, AppTheme.l, AppTheme.s),
+                    // D-071: 模型被请求但尚无任何可上屏输出时，列表末尾追加
+                    // 一颗「思考中」指示器——别让用户对着死寂猜卡没卡。
+                    itemCount: controller.bubbles.length +
+                        (controller.modelWorkingSilently ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index == controller.bubbles.length) {
+                        return _ThinkingIndicator(
+                          key: const ValueKey('thinking-indicator'),
+                          pulse: _dotsPulse,
+                          label: l10n.chatThinkingActive,
+                        );
+                      }
+                      final bubble = controller.bubbles[index];
+                      final isMsg = bubble is ChatMessage;
+                      final expanded =
+                          isMsg && _unfoldedSeqs.contains(bubble.seq);
+                      // D-087（改版 D-069）：移动端惯例（Claude / ChatGPT App）
+                      // ——思考中默认也只显示 pill（带实时字数），点开才看
+                      // 实时流；正文到达照旧收起。钉住仍全权覆盖默认。
+                      String? reasoning;
+                      if (isMsg) {
+                        reasoning = bubble.reasoningText;
+                      }
+                      final thinkingOpen =
+                          _thinkingPinned ? _thinkingOpen : false;
+                      final toolOpen =
+                          bubble is ToolNode && _openToolSeqs.contains(bubble.seq);
+                      return _BubbleTile(
+                        bubble: bubble,
+                        l10n: l10n,
+                        controller: controller,
+                        foldExpanded: expanded,
+                        onToggleFold: isMsg
+                            ? () => setState(() {
+                                  // remove 返回 false = 原本不在 → 现在展开。
+                                  if (!_unfoldedSeqs.remove(bubble.seq)) {
+                                    _unfoldedSeqs.add(bubble.seq);
+                                  }
+                                })
+                            : null,
+                        reasoning: reasoning,
+                        thinkingOpen: thinkingOpen,
+                        onToggleThinking:
+                            (reasoning != null && reasoning.isNotEmpty)
+                                ? () => setState(() {
+                                      _thinkingPinned = true;
+                                      _thinkingOpen = !thinkingOpen;
+                                    })
+                                : null,
+                        toolOpen: toolOpen,
+                        onToggleTool: bubble is ToolNode
+                            ? () => setState(() {
+                                  // 同上：remove false = 原本收起 → 现在展开。
+                                  if (!_openToolSeqs.remove(bubble.seq)) {
+                                    _openToolSeqs.add(bubble.seq);
+                                  }
+                                })
+                            : null,
                       );
-                    }
-                    final bubble = controller.bubbles[index];
-                    final isMsg = bubble is ChatMessage;
-                    final expanded =
-                        isMsg && _unfoldedSeqs.contains(bubble.seq);
-                    // D-087（改版 D-069）：移动端惯例（Claude / ChatGPT App）
-                    // ——思考中默认也只显示 pill（带实时字数），点开才看
-                    // 实时流；正文到达照旧收起。钉住仍全权覆盖默认。
-                    String? reasoning;
-                    if (isMsg) {
-                      reasoning = bubble.reasoningText;
-                    }
-                    final thinkingOpen =
-                        _thinkingPinned ? _thinkingOpen : false;
-                    final toolOpen =
-                        bubble is ToolNode && _openToolSeqs.contains(bubble.seq);
-                    return _BubbleTile(
-                      bubble: bubble,
-                      l10n: l10n,
-                      controller: controller,
-                      foldExpanded: expanded,
-                      onToggleFold: isMsg
-                          ? () => setState(() {
-                                // remove 返回 false = 原本不在 → 现在展开。
-                                if (!_unfoldedSeqs.remove(bubble.seq)) {
-                                  _unfoldedSeqs.add(bubble.seq);
-                                }
-                              })
-                          : null,
-                      reasoning: reasoning,
-                      thinkingOpen: thinkingOpen,
-                      onToggleThinking:
-                          (reasoning != null && reasoning.isNotEmpty)
-                              ? () => setState(() {
-                                    _thinkingPinned = true;
-                                    _thinkingOpen = !thinkingOpen;
-                                  })
-                              : null,
-                      toolOpen: toolOpen,
-                      onToggleTool: bubble is ToolNode
-                          ? () => setState(() {
-                                // 同上：remove false = 原本收起 → 现在展开。
-                                if (!_openToolSeqs.remove(bubble.seq)) {
-                                  _openToolSeqs.add(bubble.seq);
-                                }
-                              })
-                          : null,
-                    );
-                  },
-                ),
+                    },
+                  ),
+                    ),
             // D-072: 离底阅读历史时给一颗回底钮——跟随被你亲自关掉，
             // 回底也该由你亲自开启。
-            if (!_followBottom)
+            // D-102: 手势进行中不给：拇指底下冒出一颗按钮既没用又挡路，
+            // 还可能被同一次手势的点按误命中。
+            if (!_followBottom && !_dragging)
               Positioned(
                 right: AppTheme.m,
                 bottom: AppTheme.m,
@@ -268,10 +324,7 @@ class _ChatPaneState extends State<ChatPane>
                   shape: const CircleBorder(),
                   child: InkWell(
                     customBorder: const CircleBorder(),
-                    onTap: () {
-                      setState(() => _followBottom = true);
-                      _scrollToEnd();
-                    },
+                    onTap: _scrollToEnd,
                     child: const SizedBox(
                       width: 40,
                       height: 40,
