@@ -1,6 +1,10 @@
+import 'dart:async';
+
+import 'package:dsh_remote_app/console/agent_preset_sheet.dart';
 import 'package:dsh_remote_app/console/chat/chat_controller.dart';
 import 'package:dsh_remote_app/console/chat/chat_pane.dart';
 import 'package:dsh_remote_app/console/jobs/jobs_pane.dart';
+import 'package:dsh_remote_app/console/team/team_page.dart';
 import 'package:dsh_remote_app/console/trajectory/trajectory_ledger.dart';
 import 'package:dsh_remote_app/console/trajectory/trajectory_pane.dart';
 import 'package:dsh_remote_app/data/machines_repository.dart';
@@ -78,6 +82,9 @@ class UiProbe {
 /// 上一条用例留下的 gateway 会让下一条的「空态」悄悄变成「有数据态」——
 /// 而空态恰恰是巡检最该盯住、也最容易被污染的面。
 class SweepKit {
+  /// 巡检宿主里的 [BuildContext]。弹层类界面（agent 预设面板）需要在
+  /// 首帧之后用它调 `showModalBottomSheet`，而那时已经没有 context 参数了。
+  BuildContext? hostContext;
   FakeEngineGateway? gateway;
   FakeEngineGateway? chatGateway;
   ChatController? chat;
@@ -104,6 +111,7 @@ class UiSurface {
     this.state = UiState.populated,
     this.prepare,
     this.afterFirstPump,
+    this.openSheet,
     this.probes = const [],
     this.requiredCopy = const [],
   });
@@ -118,6 +126,14 @@ class UiSurface {
   final Future<void> Function(WidgetTester tester, SweepKit kit)? prepare;
   final Widget Function(BuildContext context, SweepKit kit) build;
   final Future<void> Function(WidgetTester tester, SweepKit kit)? afterFirstPump;
+
+  /// 弹层类界面的打开动作，在首帧之后调用。
+  ///
+  /// `showModalBottomSheet` 这类界面没法靠 [build] 返回一个 widget 来「呈现」
+  /// ——它需要宿主 context 并在路由里推一层。所以单列一个钩子，否则这类界面
+  /// 会被清单静默漏掉（agent 预设面板就是这么漏的：它是 `+` 号背后的弹层，
+  /// 不在任何 tab 的首屏上，走查时极易当成「不存在」）。
+  final Future<void> Function(BuildContext context, SweepKit kit)? openSheet;
 
   final List<UiProbe> probes;
 
@@ -441,6 +457,94 @@ List<UiSurface> buildUiInventory() => [
         ],
       ),
 
+      // ───── Console 附属：弹层与子页（不在任何 tab 的首屏上）─────
+      //
+      // 这两个界面最容易被漏检：agent 预设面板藏在顶栏 `+` 背后，team 页
+      // 藏在「成员」图标背后——真机走查按 tab 走一遍的话根本不会碰到它们。
+      // 清单必须登记它们，否则「巡检覆盖了所有界面」这句话是假的。
+      UiSurface(
+        id: 'console.agentPresetSheet',
+        title: 'agent 预设面板（+ 号弹层）',
+        group: 'Console 附属',
+        prepare: (tester, kit) async => kit.gateway = _newGateway(tester),
+        build: (ctx, kit) => const SizedBox.shrink(),
+        // 刻意**不** await 这个 Future：它的返回值是「用户选完之后的结果」，
+        // await 它等于等用户点一下——弹层就会永远开着，pumpAndSettle 死锁。
+        // 打开就够了，断言由探针在树上做。
+        openSheet: (context, kit) async {
+          unawaited(showAgentPresetSheet(context, kit.gateway!));
+        },
+        // 快路径「直接新建」必须在第一位——默认建会话只多一击（D-073）。
+        requiredCopy: [
+          '直接新建（默认预设）',
+          'standard',
+          '默认',
+          'Alpha Radar',
+          'Beta Creator',
+          '配置损坏',
+        ],
+        probes: [
+          UiProbe(
+            name: 'broken 预设可见但如实标注（配置损坏）',
+            act: (tester) async {
+              // 巡检宿主默认 zh，所以断言钉中文文案（wire 值是 'invalid
+              // config'，UI 用 l10n 的 presetsBrokenChip 渲染成「配置损坏」）。
+              // 拿英文去断言会得到一个「找不到元素」的假失败——D-052 的老坑：
+              // 没写明语言前提的断言会在语言变化时飘。
+              await tester.ensureVisible(find.textContaining('配置损坏').first);
+              await tester.pumpAndSettle();
+            },
+            expectAfter: ['配置损坏'],
+          ),
+        ],
+      ),
+      UiSurface(
+        id: 'console.team.empty',
+        title: 'team 页 · 无子代理目录',
+        group: 'Console 附属',
+        build: (ctx, kit) => TeamPage(
+          parentSessionId: 'sweep-parent',
+          // 缺席 ≠ 空列表：引擎没提供目录是一种独立的诚实回答。
+          projections: const SessionProjectionBaseline(
+            asOfSeq: 0,
+            values: Projections(),
+          ),
+          l10n: L10n.of(ctx),
+          onOpenChild: (_) {},
+        ),
+      ),
+      UiSurface(
+        id: 'console.team.catalog',
+        title: 'team 页 · 有子代理',
+        group: 'Console 附属',
+        build: (ctx, kit) => TeamPage(
+          parentSessionId: 'sweep-parent',
+          projections: SessionProjectionBaseline(
+            asOfSeq: 1,
+            values: Projections(
+              subagentCatalog: [
+                for (final raw in const [
+                  {
+                    'label': 'Alpha leg',
+                    'mode': 'continuable',
+                    'sessionId': 'child-1',
+                  },
+                  {
+                    'label': 'Beta leg',
+                    'mode': 'continuable',
+                    'sessionId': 'child-2',
+                  },
+                ])
+                  SubagentCatalogEntry.fromJson(raw),
+              ],
+            ),
+          ),
+          l10n: L10n.of(ctx),
+          onOpenChild: (_) {},
+        ),
+        requiredCopy: ['Alpha leg', 'Beta leg'],
+      ),
+
       // ───────── 设置 ─────────
       UiSurface(
         id: 'settings.home',
@@ -497,6 +601,13 @@ Future<void> sweepTapText(WidgetTester tester, String text) async {
   await tester.pumpAndSettle();
   await tester.tap(finder);
   await tester.pumpAndSettle();
+}
+
+/// 一个纯内存的引擎替身，供不依赖具体端点形状的界面用。
+FakeEngineGateway _newGateway(WidgetTester tester) {
+  final gateway = FakeEngineGateway();
+  addTearDown(gateway.dispose);
+  return gateway;
 }
 
 FakeEngineGateway _newJobsGateway(WidgetTester tester) {

@@ -105,9 +105,18 @@ Future<void> _runSurface(
   await surface.prepare?.call(tester, kit);
 
   await tester.pumpWidget(uiHost(
-    Builder(builder: (context) => surface.build(context, kit)),
+    Builder(builder: (context) {
+      kit.hostContext = context;
+      return surface.build(context, kit);
+    }),
   ));
   await surface.afterFirstPump?.call(tester, kit);
+  // 弹层类界面：首帧之后才有 context 可用（showModalBottomSheet 要宿主路由）。
+  final openSheet = surface.openSheet;
+  if (openSheet != null) {
+    await openSheet(kit.hostContext!, kit);
+    await tester.pumpAndSettle();
+  }
 
   // 三个静置节奏：一次吸收投喂、一帧走动画、再一次吸收动画尾巴。
   // pumpAndSettle 单次不够——D-071 的三点脉冲与 48ms 涂帧窗口会各欠一帧。

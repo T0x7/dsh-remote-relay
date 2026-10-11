@@ -262,14 +262,14 @@ class FakeEngineGateway implements EngineGateway {
   List<Map<String, Object?>> agentPresets = const [
     {'id': 'standard', 'order': 1, 'isDefault': true},
     {
-      'id': 'news-radar',
-      'name': '换仓雷达判读官',
-      'description': '新闻判读 Agent',
+      'id': 'alpha-radar',
+      'name': 'Alpha Radar',
+      'description': 'Reads the market feed',
       'order': 100,
     },
     {
-      'id': 'image-creator',
-      'name': '图片创作官',
+      'id': 'beta-creator',
+      'name': 'Beta Creator',
       'order': 100,
       'broken': 'invalid config',
     },

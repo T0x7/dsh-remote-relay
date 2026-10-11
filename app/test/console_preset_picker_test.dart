@@ -57,7 +57,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(find.text('直接新建（默认预设）'), findsOneWidget);
-    expect(find.text('换仓雷达判读官'), findsOneWidget);
+    expect(find.text('Alpha Radar'), findsOneWidget);
     // 「默认」角标只属于 standard 行——用精确匹配，别和「直接新建（默认
     // 预设）」的文案撞车。
     expect(find.text('默认'), findsOneWidget);
@@ -71,13 +71,13 @@ void main() {
     final sheet = await _openSheet(tester, gateway);
     await tester.pump(const Duration(milliseconds: 200));
 
-    await tester.tap(find.text('换仓雷达判读官'));
+    await tester.tap(find.text('Alpha Radar'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
     // createSession 由调用方（console_page._newSession）负责，fab 测试已
     // 端到端覆盖；面板的契约就是把选择如实 pop 回来。
-    expect(await sheet.picked, 'news-radar');
+    expect(await sheet.picked, 'alpha-radar');
   });
 
   testWidgets('直接新建：返回空串，createSession 不带 preset', (tester) async {
@@ -98,13 +98,13 @@ void main() {
     await _openSheet(tester, gateway);
     await tester.pump(const Duration(milliseconds: 200));
 
-    await tester.tap(find.text('图片创作官'));
+    await tester.tap(find.text('Beta Creator'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(find.text('配置损坏'), findsOneWidget,
         reason: '面板仍开着——不可选的行点了没反应');
-    expect(find.text('换仓雷达判读官'), findsOneWidget,
+    expect(find.text('Alpha Radar'), findsOneWidget,
         reason: '列表原样还在，可以改选别的');
   });
 
