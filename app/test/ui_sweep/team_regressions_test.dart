@@ -1,12 +1,14 @@
 import 'package:dsh_remote_app/console/chat/chat_controller.dart';
 import 'package:dsh_remote_app/console/chat/chat_pane.dart';
 import 'package:dsh_remote_app/console/console_page.dart';
+import 'package:dsh_remote_app/console/inline_error_card.dart';
 import 'package:dsh_remote_app/console/team/team_page.dart';
 import 'package:dsh_remote_app/console/workspaces/workspace_picker_page.dart';
 import 'package:dsh_remote_app/console/workspaces/workspace_registry_controller.dart';
 import 'package:dsh_remote_app/data/machine_entry.dart';
 import 'package:dsh_remote_app/data/machines_repository.dart';
 import 'package:dsh_remote_app/l10n/generated/app_localizations.dart';
+import 'package:dsh_remote_app/services/app_lifecycle_gate.dart';
 import 'package:dsh_remote_core/api/engine_models.dart';
 import 'package:dsh_remote_core/api/engine_mux.dart';
 import 'package:dsh_remote_core/api/error_code.dart';
@@ -99,6 +101,45 @@ void main() {
       expect(address.mode, SubagentMode.continuable);
     });
 
+    test('D-099: 后台→前台恢复后重开的 journal 仍带父会话 id', () async {
+      final gateway = FakeEngineGateway();
+      final gate = AppLifecycleGate();
+      final controller = ChatController(
+        gateway: gateway,
+        eventsRefreshInterval: Duration.zero,
+        lifecycle: gate,
+      )..startEvents();
+      addTearDown(() async {
+        controller.dispose();
+        await gateway.dispose();
+      });
+
+      await controller.open(
+        'child-uuid',
+        parentSessionId: 'parent-job',
+        subagentLabel: '基本面周线腿',
+        mode: SubagentMode.continuable,
+      );
+
+      // 真机 15:01 现场：App 带着子会话进后台，回前台时 resume 重开 journal
+      // ——parent 不在恢复参数里就会被兜底成 child 自己。
+      gate.enterBackground();
+      await pumpEventQueue();
+      expect(controller.suspended, isTrue);
+
+      gate.enterForeground();
+      await pumpEventQueue();
+
+      final follows =
+          gateway.calls.where((c) => c.call == 'follow').toList(growable: false);
+      expect(follows.length, greaterThanOrEqualTo(2), reason: 'resume 重开了 journal');
+      final resumed = follows.last.args as SubagentSessionAddress;
+      expect(resumed.parentSessionId, 'parent-job',
+          reason: '恢复路径丢 parent 时，引擎回 unauthorized，'
+              '子会话在回前台后变成打不开的空白页');
+      expect(resumed.childSessionId, 'child-uuid');
+    });
+
     test('普通会话仍然走 PlainSessionAddress，不受 parent 参数影响', () async {
       final gateway = FakeEngineGateway();
       final controller = ChatController(
@@ -149,6 +190,45 @@ void main() {
         reason: '流已经带着错误结束了，不能还停在转圈',
       );
       expect(find.textContaining('subagent does not belong'), findsWidgets);
+    });
+
+    testWidgets('D-100: 首帧看门狗超时同样要出错误卡', (tester) async {
+      // 真机 15:02 现场：后台恢复后 journal 45s 无首帧，logcat 打了
+      // `first-frame deadline hit`，屏幕却一直空白——看门狗只赋了 `_error`，
+      // 而 `_error` 没有任何 widget 读（与 D-095 前半同一个洞）。
+      final gateway = FakeEngineGateway();
+      final controller = ChatController(
+        gateway: gateway,
+        eventsRefreshInterval: Duration.zero,
+      )..startEvents();
+      addTearDown(() async {
+        controller.dispose();
+        await gateway.dispose();
+      });
+
+      await controller.open('never-answers');
+      await tester.pumpWidget(_host(ChatPane(controller: controller)));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget,
+          reason: '前置：还没超时，页面在等首帧');
+
+      // 推过 45s 闸（FakeAsync 下零成本），真实定时器自然触发——比
+      // onFirstFrameDeadlinePassedForTest 更贴近真实，也不会留下孤儿 Timer
+      // 触发 testWidgets 的 pending-timer 断言。
+      await tester.pump(const Duration(seconds: 46));
+      await settle(tester);
+
+      expect(
+        find.byType(CircularProgressIndicator),
+        findsNothing,
+        reason: '超时后不能再转圈',
+      );
+      expect(controller.error!.code, ErrorCode.engineTimeout);
+      expect(
+        find.byType(InlineErrorCard),
+        findsWidgets,
+        reason: '看门狗超时必须落在气泡流里——否则用户看到的就是'
+            '「空白 + 输入框」，没有任何地方解释发生了什么',
+      );
     });
   });
 
@@ -300,6 +380,48 @@ void main() {
       expect(gateway.calls.where((c) => c.call == 'workspace/follow'),
           hasLength(2),
           reason: 'retry 必须真的重开订阅，而不是只把错误清掉');
+    });
+  });
+
+  group('D-101 · 停留在轨迹页时账本重建必须立刻上屏', () {
+    testWidgets('resume 重建 ledger 后，轨迹页不再需要切走再切回', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+
+      final gateway = FakeEngineGateway(sessions: [
+        SessionSummary(
+          sessionId: 'job-weekly',
+          updatedAt: 1,
+          running: false,
+          blank: false,
+          agentAvailable: true,
+        ),
+      ]);
+      addTearDown(gateway.dispose);
+
+      await tester.pumpWidget(_host(
+        ConsolePage(store: _seededStore(), gatewayFactory: (_) => gateway),
+      ));
+      await settle(tester, steps: 16);
+
+      // 停在轨迹页：此刻没有任何帧，应是空态。
+      await tester.tap(find.text('轨迹'));
+      await settle(tester, steps: 8);
+      expect(find.text('这个会话还没有轨迹记录'), findsOneWidget,
+          reason: '前置：无记录时空态成立');
+
+      // 快照到达（resume 场景里这就是重建后的账本）。controller 会
+      // notifyListeners；轨迹页必须因此重建，而不是等用户切 tab。
+      gateway.pushFrame(sweepSnapshot(
+        id: 'job-weekly',
+        events: sweepChatEvents(),
+      ));
+      await settle(tester, steps: 16);
+
+      expect(find.text('这个会话还没有轨迹记录'), findsNothing,
+          reason: '真机 15:20：快照到了轨迹页却停在空态，切走再切回才恢复');
+      expect(find.textContaining('mcp__demo__lookup'), findsWidgets,
+          reason: '快照里的工具调用必须直接出现在轨迹页上');
     });
   });
 }

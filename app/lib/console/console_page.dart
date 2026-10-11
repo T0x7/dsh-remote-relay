@@ -567,11 +567,24 @@ class _ConsolePageState extends State<ConsolePage> {
               3 => _SegmentPlaceholder(l10n: l10n, label: l10n.consoleNoSessionBody),
               // D-042: 轨迹读的是 controller 手里那本账本，和对话同一条
               // 事件流，所以这里不额外开流——见 `ChatController.ledger`。
-              _ => TrajectoryPane(
-                  ledger: chat.ledger,
-                  gateway: chat.gateway,
-                  sessionId: chat.sessionId,
-                  subagentLabel: chat.subagentLabel,
+              //
+              // D-101: the pane itself is passive — it renders whatever the
+              // ledger projects **at build time** — and this page does not
+              // listen to the chat controller (only `ChatPane` does). So after
+              // a background/resume the ledger was rebuilt from the fresh
+              // snapshot, but a user **parked on this tab** kept seeing the
+              // empty state until they switched away and back (真机 15:20:
+              // resume 后轨迹空，切走再切回才恢复). Same shape as D-096; the
+              // rebuild trigger is the controller's notify, which carries the
+              // rebuilt projection with it.
+              _ => ListenableBuilder(
+                  listenable: chat,
+                  builder: (context, _) => TrajectoryPane(
+                    ledger: chat.ledger,
+                    gateway: chat.gateway,
+                    sessionId: chat.sessionId,
+                    subagentLabel: chat.subagentLabel,
+                  ),
                 ),
             },
           ),

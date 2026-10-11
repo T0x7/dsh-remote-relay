@@ -1,4 +1,4 @@
-# App 端实测踩坑与修复（D-067 ~ D-098）
+# App 端实测踩坑与修复（D-067 ~ D-101）
 
 > 这份文档记录 **Flutter App 在真机上暴露的问题、根因与修复**。每条都是先
 > 实锤根因、再写红测试、最后真机复验的闭环——多数坑的共同点是「看起来是
@@ -214,6 +214,43 @@ SubagentSessionAddress(parentSessionId: sessionId, childSessionId: sessionId, �
 死掉的 controller。**修**：失败屏与加载屏都补 Scaffold + 同名标题，失败屏
 再加一个重试；`WorkspaceRegistryController.retry()` 真正**重开订阅**
 （不是只清错误）。
+
+### 6.7 完整走查追加：后台恢复三连（D-099 ~ D-101）
+
+同日 15:0x，完整走查第二轮。**进后台 55s 再回前台**（复现 15:01 的现场）
+暴露了恢复路径上的三个洞，全在小米真机实锤：
+
+#### D-099 恢复路径把子代理地址的 parent 又丢了
+
+`_resumeFromBackground` 调 `open(sessionId, subagentLabel:, mode:)` ——
+**没传 parentSessionId**，`parent ?? sessionId` 兜底成 child 自己。修复前的
+现场：回前台 → 45s 无首帧 → 看门狗 → 空白。**修**：`ChatController` 记住
+`_parentSessionId`，resume 时带回。
+
+**复验**（15:15）：修复前 resume 后 45s 零帧；修复后 **0.9s FollowSnapshot
+落地**，子会话内容原样恢复。
+
+#### D-100 首帧看门狗超时同样没有 UI 出口（D-095 第三处）
+
+看门狗只赋 `_error`；`_error` 无消费者——用户对着空白页，logcat 里却明明打了
+`first-frame deadline hit`。**修**：超时也落 `ErrorNotice` 气泡（错误卡自带
+重试入口）。测试侧顺带钉了一条：**推时钟触发定时器（`pump(46s)`），别用
+`onFirstFrameDeadlinePassedForTest`**——它不清真实 Timer，testWidgets 会报
+"A Timer is still pending"。
+
+#### D-101 停留在轨迹页时，账本重建不上屏
+
+`TrajectoryPane` 是纯被动的（渲染构建时刻的 projection），ConsolePage 又不听
+ChatController（与 D-096 同族）。resume 重建 ledger 后，**恰好停在轨迹 tab 的
+用户**看到空态「这个会话还没有轨迹记录」，切走再切回才恢复。**修**：轨迹分支
+包 `ListenableBuilder(listenable: chat)`。**复验**（15:28）：resume 后 0.7s
+快照到达，轨迹页无需任何操作直接显示完整记录。
+
+**这轮的方法论教训**：三处全是**「先修了 A 面板的同族问题，B/C 面板还有同族」**
+——D-096（徽标不监听）→ D-101（轨迹不监听）；D-095（journal 错误无出口）→
+D-100（看门狗无出口）；D-094（open 丢 parent）→ D-099（resume 丢 parent）。
+**修任何「监听缺失 / 错误出口缺失 / 寻址参数缺失」时，必须 grep 全仓同类消费
+端一次做完**，否则每一处都要等下一次真机走查来暴露。
 
 ---
 

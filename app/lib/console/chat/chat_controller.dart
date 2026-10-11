@@ -360,6 +360,10 @@ class ChatController extends ChangeNotifier {
   _LiveAttempt? _live;
   SessionProjectionBaseline? _projections;
   String? _subagentLabel;
+
+  /// D-099: the parent half of the current subagent address, remembered so a
+  /// background/resume re-open can rebuild the pair. Null for plain sessions.
+  String? _parentSessionId;
   bool _loading = false;
 
   /// D-058: 首帧等待上限。
@@ -521,6 +525,12 @@ class ChatController extends ChangeNotifier {
     if (_disposed) return;
     _sessionId = sessionId;
     _subagentLabel = subagentLabel;
+    // D-099: the parent half of a subagent address must survive a
+    // background/resume cycle — `_resumeFromBackground` re-opens the journal
+    // and without this it would rebuild the address with parent = child id,
+    // which the engine answers with `subagent/unauthorized` (真机 15:01 实测:
+    // 回前台后子会话 45s 无首帧，恢复路径正是这个地址).
+    _parentSessionId = parentSessionId;
     _bubbles = [];
     // D-042: 轨迹账本跟着会话走。换会话必须连它一起换，否则轨迹会显示
     // 上一段会话的事件——而两边看起来是同一个控制台页。
@@ -926,6 +936,11 @@ class ChatController extends ChangeNotifier {
       ErrorCode.engineTimeout,
       detail: 'no first frame within ${firstFrameTimeout.inSeconds}s',
     );
+    // D-100: `_error` alone renders nowhere — ChatPane draws errors only
+    // through `ErrorNotice` bubbles (the same gap as D-095's first half). The
+    // 真机 15:02 symptom was exactly this: deadline hit, log warned, screen
+    // stayed blank. The bubble is also the retry affordance.
+    _bubbles = [..._bubbles, ErrorNotice(_error!)];
     AppLog.w('chat',
         'first-frame deadline hit (${firstFrameTimeout.inSeconds}s) session=$sessionId');
     notifyListeners();
@@ -1185,7 +1200,14 @@ class ChatController extends ChangeNotifier {
     mux?.start();
     final sessionId = _sessionId;
     if (sessionId != null) {
-      await open(sessionId, subagentLabel: _subagentLabel, mode: _readOnly);
+      await open(
+        sessionId,
+        // D-099: without the remembered parent the rebuilt subagent address
+        // reads parent = child id and the engine refuses it.
+        parentSessionId: _parentSessionId,
+        subagentLabel: _subagentLabel,
+        mode: _readOnly,
+      );
       // A second backgrounding can land inside that await; if it did, park
       // again rather than leaving a carrier open behind a backgrounded app.
       if (_suspended || _disposed) {
