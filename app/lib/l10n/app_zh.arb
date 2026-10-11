@@ -260,7 +260,7 @@
   "teamReadOnly": "只读",
   "teamModeTerminal": "终态 · 不可再派活",
   "teamModeContinuable": "可继续对话",
-  "teamFooter": "点按子代理查看只读输出；气泡流里标 lineage 指向这里",
+  "teamFooter": "点按子代理打开它的会话；能否继续对话看卡片上的模式",
   "teamBadgeTooltip": "子代理团队",
 
   "jobsEmpty": "该会话没有任务",

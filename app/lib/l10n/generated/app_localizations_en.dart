@@ -880,7 +880,7 @@ class L10nEn extends L10n {
 
   @override
   String get teamFooter =>
-      'Tap a subagent for its read-only output; lineage tags in the chat point back here';
+      'Tap a subagent to open its conversation; the card\'s mode says whether you can keep talking to it';
 
   @override
   String get teamBadgeTooltip => 'Subagent team';

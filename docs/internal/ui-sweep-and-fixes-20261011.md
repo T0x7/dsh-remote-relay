@@ -238,3 +238,31 @@ CI 的失败原因会变成「版本不对」而不是真正的回归。
 2. **fixture 的键位形状必须来自第一方契约**，不是「代码现在这么读」。D-093 里两条
    测试因为 fixture 写错而长期假绿——护栏跟着代码一起错，等于没有护栏。
 3. **修完必做「回退即红」验证**。只跑「现在是绿的」证明不了守门有效。
+
+---
+
+## 10. 追加：第二轮走查（同日下午，D-094 ~ D-098）
+
+目标：验证「智能体团队」页（用户点名）。目标会话 `job-weekly-20261011-030055`
+（4 个子代理）。**team 页本身零缺陷**（布局、换行、mode 点、只读标记），但链路上
+挖出五个洞，全部修复并有守门（`test/ui_sweep/team_regressions_test.dart`，7 例）：
+
+| ID | 一句话 | 修在哪 |
+|---|---|---|
+| D-094 | 子代理会话地址 `(parent, child)` 的 parent 被填成 child 自己 ⇒ 引擎回 `subagent/unauthorized`，点子代理必失败 | `chat_controller.dart` `open(parentSessionId:)` |
+| D-095 | journal 错误只认 `EngineRemoteError`；且 `_error` 无消费者——错误必须落 `ErrorNotice` 气泡才可见 | `chat_controller.dart` journal 错误订阅 |
+| D-096 | 子代理徽标不在 `ChatController` 的监听者里，count 永远停在快照前的 0 | `console_page.dart` 徽标包 `ListenableBuilder` |
+| D-097 | 页脚说「只读输出」，而引擎 170 条 catalog 实测全是 continuable（可写） | arb + 生成件改文案 |
+| D-098 | 工作区注册表失败屏没有 Scaffold：无标题、无返回、无重试，且流死了重进也没用 | `workspace_picker_page.dart` + `WorkspaceRegistryController.retry()` |
+
+**两条方法论级别的收获**（比五个 bug 本身更值钱）：
+
+1. **「扫错误只认一种异常类型」这个坑本轮第二次出现**（D-089 jobs_pane、D-095
+   chat journal）。修一处必须按类型把全仓流消费端扫一遍，否则永远还有下一个。
+2. **临时探针日志定位链路**：`engine_mux.dart` 加 4 处 `print`（入帧/出帧/排队/
+   非字符串帧）+ 真机 logcat，5 分钟钉死引擎回了 `subagent/unauthorized`——
+   事后 `git checkout --` 一键回滚。比反复猜测快一个量级。
+
+测试侧新坑（下次直接绕开）：`testWidgets` 的 FakeAsync 区里
+**`await Future.delayed(Duration.zero)` 会把测试吊死**（真实定时器永不触发）；
+纯 `test()` 里同句没问题。等流事件用 `tester.pump` 有界推进。

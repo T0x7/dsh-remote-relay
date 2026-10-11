@@ -397,6 +397,7 @@ class _ConsolePageState extends State<ConsolePage> {
           Navigator.of(context).pop();
           chat.open(
             child.id,
+            parentSessionId: sessionId,
             subagentLabel: child.label ?? child.id,
             mode: child.mode,
           );
@@ -472,17 +473,33 @@ class _ConsolePageState extends State<ConsolePage> {
           // Team badge: the count is the number of children in the parent
           // session's catalog, which is a real projection value — not a
           // running tally, because the wire carries no per-child activity.
+          //
+          // D-096: this used to be a bare `Builder`, so the badge was computed
+          // once per `ConsolePage.setState` — and the page does not listen to
+          // the chat controller (only `ChatPane` does, for the bubble list).
+          // The catalog arrives with the follow snapshot, long after the AppBar
+          // built, so `count` was stuck at the pre-snapshot 0 and the one
+          // affordance that says "this session has subagents" never lit up
+          // (真机 2026-10-11: 徽标无数字，点进去却有 4 个子代理). Listening to
+          // the controller is the fix; the `Builder` is kept so `L10n` still
+          // resolves against the AppBar's context.
           Builder(
             builder: (context) {
-              final count =
-                  _chat?.projections?.values.subagentCatalog?.length ?? 0;
-              return IconButton(
-                tooltip: l10n.teamBadgeTooltip,
-                onPressed: _openTeam,
-                icon: Badge(
-                  isLabelVisible: count > 0,
-                  label: Text('$count'),
-                  child: const Icon(Icons.groups_outlined, size: 20),
+              final chat = _chat;
+              Widget badge(int count) => IconButton(
+                    tooltip: l10n.teamBadgeTooltip,
+                    onPressed: _openTeam,
+                    icon: Badge(
+                      isLabelVisible: count > 0,
+                      label: Text('$count'),
+                      child: const Icon(Icons.groups_outlined, size: 20),
+                    ),
+                  );
+              if (chat == null) return badge(0);
+              return ListenableBuilder(
+                listenable: chat,
+                builder: (context, _) => badge(
+                  chat.projections?.values.subagentCatalog?.length ?? 0,
                 ),
               );
             },

@@ -1,4 +1,4 @@
-# App 端实测踩坑与修复（D-067 ~ D-093）
+# App 端实测踩坑与修复（D-067 ~ D-098）
 
 > 这份文档记录 **Flutter App 在真机上暴露的问题、根因与修复**。每条都是先
 > 实锤根因、再写红测试、最后真机复验的闭环——多数坑的共同点是「看起来是
@@ -145,6 +145,76 @@ UI 又把 `'tool'` 过滤掉。**修**：改读 `message.toolCallId`。
 守卫误杀，`logcat` 打 `gateway/protocol`，界面却看着正常。**修**：重开路径允许
 re-baseline。
 
+### 6.6 「智能体团队」这条链路的五个洞（D-094 ~ D-098）
+
+2026-10-11 小米真机。目标会话 `job-weekly-20261011-030055`（4 个子代理）。
+**team 页本身展示全对**：标题、`4 个子代理`、标签完整换行不截断（引擎实测
+label 最长 50 字符）、绿点、`可继续对话`、无只读标记——但**点进去是空白**，
+而且**顶栏徽标不亮**。逐条如下。
+
+#### D-094 子代理会话打不开（`parentSessionId` 被填成 child 自己）
+
+**现象**：点任一子代理 → 内容区全空，只有一个几乎看不见的转圈残影；顶部
+上下文胶囊还冻在**父会话**的数值（17% / 282.1 tok/s / 缓存 94%）。
+
+**根因**：`ChatController.open` 构造 `SubagentSessionAddress` 时，parent 和
+child 两半都填了同一个 `sessionId`：
+
+```dart
+SubagentSessionAddress(parentSessionId: sessionId, childSessionId: sessionId, …)
+```
+
+而 team 页传进来的 `sessionId` 就是 **child 自己的 id**（`console_page` 只把
+`child.id` 递下去，`TeamPage.parentSessionId` 从未参与）。引擎回的帧是：
+
+```
+{"type":"error","code":"subagent/unauthorized",
+ "message":"subagent does not belong to the supplied parent"}
+```
+
+**根子**：子代理在 wire 上**成对寻址**，光有 child id 不可寻址——这正是协议
+单独定义 `SubagentSessionAddress` 的原因。**修**：`open()` 增加显式
+`parentSessionId` 形参，`console_page` 把当前父会话 id 传下去。
+
+#### D-095 对话流错误被吞（D-089 的另一半）
+
+`chat_controller` 的 journal 错误订阅写的是 `if (e is EngineRemoteError)`，
+而**流**的错误一律是 `MuxStreamError`——于是 `unauthorized` 只进了
+`AppLog.w`，界面保持空白。**同一个洞在 jobs_pane 上已经修过一次（D-089）**，
+对话侧漏了。**修**：两种异常都走 `toAppError()`，未知类型才置 null。
+
+> 教训可复用：**扫错误只认一种异常类型 = 该分支永远没测过**。修一处要按类型
+> 把全仓的流消费端扫一遍。
+
+#### D-096 子代理徽标永远不亮
+
+徽标数字来自 `_chat?.projections?.values.subagentCatalog?.length`，但
+`ConsolePage` **不订阅** `ChatController`（只有 `ChatPane` 订阅，那是给气泡
+列表用的）。目录随 follow 快照晚到，而 AppBar 只在 `ConsolePage.setState` 时
+重建——所以 count 永远停在快照前的 0。真机表现：**徽标无数字，点进去却有 4 个
+子代理**。「这个会话有子代理」的唯一入口因此是哑的。**修**：徽标包一层
+`ListenableBuilder(listenable: chat)`。
+
+#### D-097 页脚把可写说成只读
+
+页脚原文「点按子代理查看**只读输出**」，但 `continuable` 子代理会拿到输入框
+——协议上 `mode` 才是只读判据，`one-shot` 才是终态。而且引擎 504 个会话、
+170 条 catalog 条目**实测全是 `continuable`，没有一条 `one-shot`**，
+所以真机上 100% 会看到矛盾文案。**修**：文案改成「点按子代理打开它的会话；
+能否继续对话看卡片上的模式」。
+
+> 附带结论：`one-shot` / 只读分支**无法用真机数据验证**，只由
+> `team_page_test.dart` 的 widget 测试守着。别把它当成「验过了」。
+
+#### D-098 工作区注册表失败屏是死胡同
+
+`WorkspacePickerPage._body` 在 `registry.error != null` 时直接
+`return _Centered(...)` —— **没有 Scaffold**，于是这一屏没有 AppBar、没有
+标题、没有返回键、没有重试按钮。流此时已经结束，重进页面也只会拿到同一个
+死掉的 controller。**修**：失败屏与加载屏都补 Scaffold + 同名标题，失败屏
+再加一个重试；`WorkspaceRegistryController.retry()` 真正**重开订阅**
+（不是只清错误）。
+
 ---
 
 ## 7. 环境陷阱速查
@@ -157,6 +227,9 @@ re-baseline。
 | 中继 mux 长连变聋 | socket 活着但帧不转发 | 周期重开 `$events` 自愈（App 已内置 60s）|
 | 集成套件多文件同跑 | flutter_tools 通道挂死（单跑全绿）| 逐文件跑 |
 | `adb input swipe` 太快 | 150ms 快甩被系统当误触丢弃、页面纹丝不动 | 用 ≥350ms；否则会误判成「列表卡住」 |
+| VM service 的 `debugPaintBaselinesEnabled` | 截图里**每段文字下都有两条亮黄线**，看起来像样式炸了 | 文字本身的颜色/字号是对的，黄线是 baseline 调试层；重启 App 进程即消失 |
+| 引擎直连好 ≠ 手机端好 | curl `127.0.0.1:3080/api/…` 与 WS mux 秒回，手机同一端点却无响应 | 手机走的是 `https://relay.example.com`（VPS）→ 插件隧道 → 引擎；先确认 `GET /dsh-remote/session` 里的 `tunnel.relayUrl`，别在引擎侧空查 |
+| 中继 URL 会话凭据不可外借 | 拿插件 `active` 那条会话的 qrUrl/hash 去 `wss://` 握手，一律 401 | 设备侧 bearer 是 `<sid>.<expMs>.<mid>.<t>.<hash>`，且必须已被**那台 VPS 中继**认识；换会话号就换一套凭据 |
 
 ## 8. 已知引擎侧问题（不在本仓，需引擎修）
 

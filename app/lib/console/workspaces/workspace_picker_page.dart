@@ -299,14 +299,44 @@ class _WorkspacePickerPageState extends State<WorkspacePickerPage> {
     final registry = widget.registry;
     final error = registry.error;
     if (error != null) {
-      return _Centered(text: l10n.workspacesUnavailable);
+      // D-098: this used to return a bare `_Centered`, i.e. **no Scaffold at
+      // all** — so the page lost its AppBar, its title and its back button, and
+      // the user was parked on a full-screen sentence with only the system
+      // gesture to escape. Same title as the healthy path, plus a retry that
+      // re-opens the stream (a finished stream cannot be re-read).
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(l10n.workspacesTitle(widget.machineName),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          backgroundColor: AppTheme.bg,
+          actions: [
+            IconButton(
+              tooltip: l10n.retry,
+              onPressed: registry.retry,
+              icon: const Icon(Icons.refresh, size: 20),
+            ),
+          ],
+        ),
+        body: _Centered(text: l10n.workspacesUnavailable),
+      );
     }
     if (!registry.loaded) {
-      return const Center(
-        child: SizedBox(
-          width: 22,
-          height: 22,
-          child: CircularProgressIndicator(strokeWidth: 2),
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(l10n.workspacesTitle(widget.machineName),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          backgroundColor: AppTheme.bg,
+        ),
+        body: const Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
         ),
       );
     }

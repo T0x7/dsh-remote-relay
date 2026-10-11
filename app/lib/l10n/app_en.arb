@@ -260,7 +260,7 @@
   "teamReadOnly": "read-only",
   "teamModeTerminal": "terminal · cannot be given more work",
   "teamModeContinuable": "can be continued",
-  "teamFooter": "Tap a subagent for its read-only output; lineage tags in the chat point back here",
+  "teamFooter": "Tap a subagent to open its conversation; the card's mode says whether you can keep talking to it",
   "teamBadgeTooltip": "Subagent team",
 
   "jobsEmpty": "This session has no jobs",

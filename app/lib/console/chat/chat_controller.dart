@@ -510,6 +510,7 @@ class ChatController extends ChangeNotifier {
     String? sessionId, {
     String? subagentLabel,
     SubagentMode mode = SubagentMode.continuable,
+    String? parentSessionId,
   }) async {
     await _closeJournal();
     // D-041: `open` is deliberately NOT awaited in front of the navigation
@@ -552,10 +553,17 @@ class ChatController extends ChangeNotifier {
     // until the 60s periodic re-open happened to land.
     _subscribeEvents();
 
+    // D-094: a subagent is addressed by the **pair** (parent, child) — the wire
+    // type is `SubagentSessionAddress` precisely because a bare child id is not
+    // addressable (`subagent/unauthorized`: "subagent does not belong to the
+    // supplied parent"). This used to fill both halves with `sessionId`, which
+    // on the team page IS the child's own id, so every subagent conversation
+    // came back unauthorized — and D-095 then swallowed the error, leaving a
+    // blank page. Callers that open a child must pass the parent's id.
     final address = subagentLabel == null
         ? PlainSessionAddress(sessionId)
         : SubagentSessionAddress(
-            parentSessionId: sessionId,
+            parentSessionId: parentSessionId ?? sessionId,
             childSessionId: sessionId,
             mode: mode,
           );
@@ -567,7 +575,27 @@ class ChatController extends ChangeNotifier {
     });
     _journalErrorSub = _journal!.errors.listen((Object e) {
       AppLog.w('chat', 'journal error: $e');
-      if (e is EngineRemoteError) _error = e.toAppError();
+      // D-095: `if (e is EngineRemoteError)` was the whole filter, and the
+      // journal's errors arrive as `MuxStreamError` — every unauthorized
+      // subagent address and every dropped carrier was logged and then dropped
+      // on the floor. Same lesson as D-089 on the jobs pane: both types carry
+      // `toAppError()` off one shared code table, so accepting both costs
+      // nothing.
+      //
+      // D-095 (second half, found by the guard test): setting `_error` alone
+      // still shows nothing — **no widget reads this getter**. The bubbles list
+      // is the only surface ChatPane renders errors on (the prompt-failure path
+      // has always done this), so a dead journal must land there too. Without
+      // this the user sees an empty conversation with a composer, i.e. exactly
+      // the 真机 blank page from 2026-10-11.
+      final appError = switch (e) {
+        final MuxStreamError err => err.toAppError(),
+        final EngineRemoteError err => err.toAppError(),
+        _ => AppError(ErrorCode.engineUnknown,
+            rawMessage: e.toString()),
+      };
+      _error = appError;
+      _bubbles = [..._bubbles, ErrorNotice(appError)];
       _disarmFirstFrameDeadline();
       _loading = false;
       notifyListeners();

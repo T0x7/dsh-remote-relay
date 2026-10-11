@@ -132,6 +132,26 @@ class WorkspaceRegistryController extends ChangeNotifier {
     });
   }
 
+  /// D-098: tear the subscription down and open it again.
+  ///
+  /// The failure screen used to be a dead end — no Scaffold, so no AppBar, no
+  /// back button and no way to ask again, and the stream itself was already
+  /// finished, so re-entering the page would have handed back the same dead
+  /// controller. A retry has to re-**open**, not just re-read.
+  Future<void> retry() async {
+    if (_disposed) return;
+    await _sub?.cancel();
+    _sub = null;
+    await _errorSub?.cancel();
+    _errorSub = null;
+    _stream?.dispose();
+    _stream = null;
+    _error = null;
+    _loaded = false;
+    notifyListeners();
+    _open();
+  }
+
   // ------------------------------------------------- D-055: the write side
 
   /// Which archived rows the page shows — the engine's own three-way choice

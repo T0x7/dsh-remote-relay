@@ -823,7 +823,7 @@ class L10nZh extends L10n {
   String get teamModeContinuable => '可继续对话';
 
   @override
-  String get teamFooter => '点按子代理查看只读输出；气泡流里标 lineage 指向这里';
+  String get teamFooter => '点按子代理打开它的会话；能否继续对话看卡片上的模式';
 
   @override
   String get teamBadgeTooltip => '子代理团队';

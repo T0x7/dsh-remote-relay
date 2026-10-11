@@ -436,11 +436,28 @@ class FakeEngineGateway implements EngineGateway {
         ..clear()
         ..addAll(frames);
 
+  /// D-098: fail the **next** `workspace/follow` with this error, then behave.
+  ///
+  /// One-shot on purpose — that is what makes `retry()` testable: the failure
+  /// screen needs a way back, and the only honest way back is a stream that
+  /// can actually come up again.
+  Object? workspaceError;
+
+  void raiseWorkspaceError(Object error) => workspaceError = error;
+
   @override
   WorkspaceFollowStream followWorkspaces() {
     calls.add((call: 'workspace/follow', args: null));
+    final error = workspaceError;
+    workspaceError = null;
     return WorkspaceFollowStream.fromSource(
-      Stream<Object?>.fromIterable(workspaceFrames),
+      Stream<Object?>.multi((c) {
+        for (final frame in workspaceFrames) {
+          c.add(frame);
+        }
+        if (error != null) c.addError(error);
+        c.close();
+      }),
     );
   }
 

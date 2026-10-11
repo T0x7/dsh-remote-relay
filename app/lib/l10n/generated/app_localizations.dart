@@ -1612,7 +1612,7 @@ abstract class L10n {
   /// No description provided for @teamFooter.
   ///
   /// In en, this message translates to:
-  /// **'Tap a subagent for its read-only output; lineage tags in the chat point back here'**
+  /// **'Tap a subagent to open its conversation; the card\'s mode says whether you can keep talking to it'**
   String get teamFooter;
 
   /// No description provided for @teamBadgeTooltip.
