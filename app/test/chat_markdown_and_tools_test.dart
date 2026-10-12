@@ -137,6 +137,34 @@ void main() {
     expect(find.textContaining('要点', findRichText: true), findsOneWidget);
   });
 
+  /// D-106：折叠预览里的 markdown 表格不该把语法符号露出来。
+  ///
+  /// 真机（vivo）实拍：长回答里的表格在折叠态原样显示成
+  /// `| 位置 | 含义 |` / `|----|----|` / `| 20.00 | 9 月中下旬…` 一片竖线。
+  /// 根因在 [_previewOf]：D-070.1 那套净化只认 `#`/`**`/反引号/列表符号，
+  /// **完全没处理表格**——而折叠态走的正是它（富文本只在展开后才有）。
+  testWidgets('D-106 折叠预览里的表格：竖线与分隔行不外露', (tester) async {
+    final table = '| 位置 | 含义 |\n|----|----|\n| 20.00 | 整数关口 |\n| 21.00 | 前高 |';
+    // 撑过 600 字折叠阈值，让这段真的走折叠预览路径。
+    final filler = '补充说明行。' * 120; // 840 字 > _foldChars(600)
+    await _openConsole(tester,
+        records: [FollowEvent(_assistantMessage(1, '结论\n\n$table\n\n$filler'))]);
+
+    expect(find.textContaining('展开全文'), findsOneWidget,
+        reason: '前置条件：这段必须是折叠态，否则测的是富文本路径');
+
+    expect(find.textContaining('|----'), findsNothing,
+        reason: '表格分隔行是语法噪音，预览里不该出现（D-070.1 的同一条标准）');
+    expect(find.textContaining('| 位置 |'), findsNothing,
+        reason: '表头不该带着竖线原样出现');
+    expect(find.textContaining('| 20.00'), findsNothing,
+        reason: '数据行也不该带着竖线');
+
+    expect(find.textContaining('整数关口'), findsOneWidget,
+        reason: '去掉符号不等于去掉内容——表格里的字还得在');
+    expect(find.textContaining('前高'), findsOneWidget);
+  });
+
   testWidgets('tool 行点开看参数与结果，再点收起', (tester) async {
     await _openConsole(
         tester,

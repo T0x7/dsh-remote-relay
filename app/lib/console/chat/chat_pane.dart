@@ -460,14 +460,35 @@ String? _toolDigest(String? arguments, String? result) {
 /// 展开后的正文仍是原文渲染的 markdown。
 String _previewOf(String src) => src
     .split('\n')
-    .map((line) {
-      var l = line.replaceFirst(RegExp(r'^\s{0,3}#{1,6}\s+'), '');
-      l = l.replaceAll('**', '');
-      l = l.replaceAll('`', '');
-      l = l.replaceFirst(RegExp(r'^\s*[-*]\s+'), '· ');
-      return l;
-    })
+    .map(_previewLine)
     .join('\n');
+
+/// D-106: 预览净化的单行版本。
+///
+/// 表格是这轮补上的：只认 `#`/`**`/反引号/列表符号的那套净化，会把
+/// `| 位置 | 含义 |`、`|----|----|` 原样留给用户——真机实拍就是一片竖线。
+/// 竖线和分隔行都是**语法符号**，分隔行整行丢掉，数据行压成 `位置 · 含义`，
+/// 内容一个字不少。折叠态走的正是这条路径（富文本只在展开后才有），所以漏了
+/// 它，长回答里的表格必然露馅。
+String _previewLine(String line) {
+  var l = line.replaceFirst(RegExp(r'^\s{0,3}#{1,6}\s+'), '');
+  l = l.replaceAll('**', '');
+  l = l.replaceAll('`', '');
+  l = l.replaceFirst(RegExp(r'^\s*[-*]\s+'), '· ');
+
+  final trimmed = l.trim();
+  if (!trimmed.startsWith('|')) return l;
+  // 分隔行 `|---|---|` / `|:---|---:|`：整行是语法，丢掉。
+  if (RegExp(r'^[|\s:-]+$').hasMatch(trimmed)) return '';
+  // 数据行：去掉首尾竖线，单元格之间用 · 分隔。
+  final cells = trimmed
+      .replaceAll(RegExp(r'^\|'), '')
+      .replaceAll(RegExp(r'\|$'), '')
+      .split('|')
+      .map((c) => c.trim())
+      .where((c) => c.isNotEmpty);
+  return cells.join(' · ');
+}
 
 /// D-069: 系统注入的识别标记。这些前缀是宿主/引擎塞进对话的样板（工作须知、
 /// 运行时上下文快照、技能清单…），不是对话内容——无论长短一律收成一行摘要条。
