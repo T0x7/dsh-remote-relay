@@ -12,10 +12,23 @@ import 'package:flutter/material.dart';
 /// three-段式 contract (copy → detail → no code leak) has exactly one
 /// implementation.
 class InlineErrorCard extends StatelessWidget {
-  const InlineErrorCard({super.key, required this.error, required this.l10n});
+  const InlineErrorCard({
+    super.key,
+    required this.error,
+    required this.l10n,
+    this.onRetry,
+  });
 
   final AppError error;
   final L10n l10n;
+
+  /// D-104: 传进来就渲染一颗可点的「重试」。
+  ///
+  /// 修之前这张卡只有文案，而文案里写着「正在重试」——真机上点它毫无反应、
+  /// 网络恢复后也不会自愈（vivo 10-12 实测）。一张会喊「正在重试」却不能
+  /// 点的卡片，比没有卡片更糟：它让用户以为 App 在忙，然后一直等下去。
+  /// **看得见 ≠ 有出口可用**，这是同一族缺陷（D-095/D-100）的第三次。
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +50,24 @@ class InlineErrorCard extends StatelessWidget {
             Text(detail,
                 style: const TextStyle(
                     fontSize: 10, fontFamily: 'monospace', color: AppTheme.inkDim)),
+          ],
+          if (onRetry != null) ...[
+            const SizedBox(height: AppTheme.s),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: onRetry,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.danger,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppTheme.m, vertical: AppTheme.xs),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(l10n.actionRetry,
+                    style: const TextStyle(fontSize: 12.5)),
+              ),
+            ),
           ],
         ],
       ),

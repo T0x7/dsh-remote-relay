@@ -201,10 +201,10 @@ void main() {
         gateway: gateway,
         eventsRefreshInterval: Duration.zero,
       )..startEvents();
-      addTearDown(() async {
-        controller.dispose();
-        await gateway.dispose();
-      });
+      // D-104: 自动重开会装上**新的**首帧看门狗，而 addTearDown 跑在
+      // testWidgets 的 pending-timer 断言之后——所以 controller 必须在本
+      // 测试体内显式 dispose，gateway 留给 tearDown。
+      addTearDown(gateway.dispose);
 
       await controller.open('never-answers');
       await tester.pumpWidget(_host(ChatPane(controller: controller)));
@@ -214,6 +214,9 @@ void main() {
       // 推过 45s 闸（FakeAsync 下零成本），真实定时器自然触发——比
       // onFirstFrameDeadlinePassedForTest 更贴近真实，也不会留下孤儿 Timer
       // 触发 testWidgets 的 pending-timer 断言。
+      //
+      // D-104：超时后有 3s 退避的自动重开，所以停在 46s 这个窗口里断言——
+      // 此刻错误卡刚落地，自动重开还没发生。
       await tester.pump(const Duration(seconds: 46));
       await settle(tester);
 
@@ -229,6 +232,107 @@ void main() {
         reason: '看门狗超时必须落在气泡流里——否则用户看到的就是'
             '「空白 + 输入框」，没有任何地方解释发生了什么',
       );
+
+      // D-104：那张卡带着「正在重试」的文案，就必须真的会重试一次。
+      final followsBefore = gateway.calls
+          .where((c) => c.call == 'follow')
+          .length;
+      await tester.pump(const Duration(seconds: 4));
+      await settle(tester);
+      final followsAfter = gateway.calls
+          .where((c) => c.call == 'follow')
+          .length;
+      expect(
+        followsAfter,
+        greaterThan(followsBefore),
+        reason: '文案写着「正在重试」就必须真重开一次 journal；'
+            '真机（vivo）上网络恢复后这张卡永不消失，用户只能自己去会话'
+            '列表重新进入（2026-10-12 实测）',
+      );
+
+      controller.dispose();
+    });
+
+    /// D-104：自动重开**只能发生一次**。
+    ///
+    /// 真机（小米 2026-10-12）当场抓到过这个 bug：日志里每 48 秒一次
+    /// `first-frame deadline hit → auto-reopening → open journal`，无穷无尽，
+    /// 用户永远只看到一个转圈。起因是自动重开也调了 `retry()`，而 `retry()`
+    /// 为「用户主动点了就给一次自动兜底」重置了预算——于是每次都把预算花光
+    /// 再重置。第一版守门只推进了 4 秒（只够验一次自动重开），所以没抓住。
+    testWidgets('D-104: 第二次超时不得再自动重开（预算只花一次）', (tester) async {
+      final gateway = FakeEngineGateway();
+      final controller = ChatController(
+        gateway: gateway,
+        eventsRefreshInterval: Duration.zero,
+      )..startEvents();
+      addTearDown(gateway.dispose);
+
+      await controller.open('never-answers');
+      await tester.pumpWidget(_host(ChatPane(controller: controller)));
+
+      // 第一轮：45s 超时 → 3s 退避 → 自动重开一次。
+      await tester.pump(const Duration(seconds: 49));
+      await settle(tester);
+      final afterFirst =
+          gateway.calls.where((c) => c.call == 'follow').length;
+      expect(afterFirst, greaterThan(1),
+          reason: '第一次超时后应自动重开一次');
+
+      // 第二轮：又超时 45s。这一次**不允许**再自动重开——否则就是死循环。
+      await tester.pump(const Duration(seconds: 49));
+      await settle(tester);
+      final afterSecond =
+          gateway.calls.where((c) => c.call == 'follow').length;
+      expect(
+        afterSecond,
+        afterFirst,
+        reason: '自动重开的预算只花一次：第二次超时必须停下来等用户点重试，'
+            '否则每 45s 无限重开，用户永远只看到转圈（小米真机 10:49 实锤）',
+      );
+      expect(find.byType(InlineErrorCard), findsWidgets,
+          reason: '停下来的那一刻必须留一张可见的错误卡 + 重试按钮');
+
+      controller.dispose();
+    });
+
+    /// D-104：错误卡必须**可点**。
+    ///
+    /// 修之前它只有文案：真机上点它毫无反应，而文案还写着「正在重试」——
+    /// 一张会喊「正在重试」却不能点的卡片，比没有卡片更让人空等
+    /// （vivo 2026-10-12 实测）。
+    testWidgets('D-104: 错误卡带可点的重试，点它重开 journal', (tester) async {
+      final gateway = FakeEngineGateway();
+      final controller = ChatController(
+        gateway: gateway,
+        eventsRefreshInterval: Duration.zero,
+      )..startEvents();
+      addTearDown(gateway.dispose);
+
+      await controller.open('never-answers');
+      await tester.pumpWidget(_host(ChatPane(controller: controller)));
+      await tester.pump(const Duration(seconds: 46));
+      await settle(tester);
+
+      // 断言放在超时窗口内：此刻错误卡刚落地，自动重开还没触发。
+      final retryButton = find.widgetWithText(TextButton, '重试');
+      expect(controller.canRetry, isTrue,
+          reason: 'engineTimeout 的 RetryPolicy 是 autoBackoff，值得给用户按钮');
+      expect(retryButton, findsOneWidget,
+          reason: '错误卡必须带可点的重试出口');
+
+      final followsBefore =
+          gateway.calls.where((c) => c.call == 'follow').length;
+      await tester.tap(retryButton);
+      await tester.pump();
+      await settle(tester);
+      expect(
+        gateway.calls.where((c) => c.call == 'follow').length,
+        greaterThan(followsBefore),
+        reason: '点重试必须真的重开 journal',
+      );
+
+      controller.dispose();
     });
   });
 

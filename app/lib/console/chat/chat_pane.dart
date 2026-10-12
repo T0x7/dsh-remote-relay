@@ -778,9 +778,15 @@ class _BubbleTile extends StatelessWidget {
                 onAbandon: () => controller.rejectQuestion(l10n.chatQuestionAbandonReason),
               );
       case ErrorNotice(:final error):
+        // D-104: 会话页的错误卡带真实重试（重开 journal）——只有对话页有
+        // 「重开当前会话」这个动作可做，其它页面复用本卡片时不传回调。
         return Padding(
           padding: const EdgeInsets.only(bottom: AppTheme.s),
-          child: InlineErrorCard(error: error, l10n: l10n),
+          child: InlineErrorCard(
+            error: error,
+            l10n: l10n,
+            onRetry: controller.canRetry ? controller.retry : null,
+          ),
         );
     }
   }

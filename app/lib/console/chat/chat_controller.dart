@@ -554,6 +554,7 @@ class ChatController extends ChangeNotifier {
     }
 
     _loading = true;
+    _autoReopenSpent = false;
     notifyListeners();
     _armFirstFrameDeadline(sessionId);
     // D-079: entering a session re-subscribes `$events` so an approval raised
@@ -570,20 +571,38 @@ class ChatController extends ChangeNotifier {
     // on the team page IS the child's own id, so every subagent conversation
     // came back unauthorized — and D-095 then swallowed the error, leaving a
     // blank page. Callers that open a child must pass the parent's id.
+    _openJournal(sessionId, subagentLabel: subagentLabel,
+        parentSessionId: parentSessionId);
+  }
+
+  /// D-104: 同步打开 journal（[open] 与 [retry] 共用）。
+  ///
+  /// 子代理在 wire 上成对寻址（D-094）：`SubagentSessionAddress` 缺 parent 引擎
+  /// 回 `subagent/unauthorized`，所以 parent 一律由调用方另传，兜底成 child
+  /// 自己只会得到一个空白的子会话页。
+  void _openJournal(
+    String sessionId, {
+    String? subagentLabel,
+    String? parentSessionId,
+  }) {
     final address = subagentLabel == null
         ? PlainSessionAddress(sessionId)
         : SubagentSessionAddress(
             parentSessionId: parentSessionId ?? sessionId,
             childSessionId: sessionId,
-            mode: mode,
+            mode: _readOnly,
           );
+    final gen = ++_journalGeneration;
     _journal = gateway.follow(address: address);
-    AppLog.d('e2e', '[e2e] open journal addr=$address');
+    AppLog.d('e2e', '[e2e] open journal addr=$address gen=$gen');
     _journalSub = _journal!.frames.listen((f) {
+      // 旧流（关闭动作是异步的）迟到的帧一律丢弃。
+      if (_disposed || gen != _journalGeneration) return;
       AppLog.d('e2e', '[e2e] frame ${f.runtimeType}');
       applyFrame(f);
     });
     _journalErrorSub = _journal!.errors.listen((Object e) {
+      if (_disposed || gen != _journalGeneration) return;
       AppLog.w('chat', 'journal error: $e');
       // D-095: `if (e is EngineRemoteError)` was the whole filter, and the
       // journal's errors arrive as `MuxStreamError` — every unauthorized
@@ -904,6 +923,73 @@ class ChatController extends ChangeNotifier {
     }
   }
 
+  /// D-104: 自动重开预算与重入保护。
+  ///
+  /// 自动重开**只做一次**：反复 45s 超时反复重开会把设备电和网络一起耗在
+  /// 一件注定失败的事上，第二次起就交给用户手上的「重试」按钮。
+  bool _autoReopenSpent = false;
+  bool _reopening = false;
+
+  /// D-104: 每次开 journal 递增。关闭旧流的 `cancel()` 是异步的，新流已经
+  /// 绑定时旧流可能还递上来几帧——代号不符的一律丢弃，别让上一段会话的
+  /// 幽灵帧画到新会话屏幕上。
+  int _journalGeneration = 0;
+  Timer? _autoReopenTimer;
+
+  /// D-104: 会话页该给用户一个「重试」按钮吗？
+  ///
+  /// 错误码表已经把重试策略写死了（`RetryPolicy.autoBackoff` 等），这里只是
+  /// 把「这条错误值得重试」翻译成 UI 事实——修之前错误卡只印文案、不可点，
+  /// 而文案还写着「正在重试」，是真机实测出来的谎（D-104）。
+  bool get canRetry =>
+      _error != null && _error!.retry != RetryPolicy.none && !_reopening;
+
+  /// D-104: 手动重试——重开当前会话的 journal。
+  ///
+  /// **刻意不走 [open]**：`open` 首行 `await _closeJournal()`，而取消订阅要等
+  /// 真实异步；在 widget 测试的 FakeAsync 区里这个 await 永远不完成（真机上
+  /// 没事，但守门会被吊死，见 D-103 那条）。所以重试走同步路径：发起取消、
+  /// 立刻重开，用 [_journalGeneration] 挡住旧流的迟到帧。
+  ///
+  /// 手动重试会重置自动重开预算——用户既然主动点了，就该再给他一次自动兜底。
+  void retry() => _reopenJournal(manual: true);
+
+  /// D-104: 自动重开走同一条路，但**不重置** [_autoReopenSpent]。
+  ///
+  /// 真机（小米 10:49）当场抓到过这个坑：自动重开当初也调 [retry]，而
+  /// [retry] 为了「用户主动点了就给一次自动兜底」把预算重置了——于是
+  /// 每 48 秒重开一次、无穷无尽，用户永远只看到一个转圈。手动手���重置预算
+  /// 是对的，让自动路径跟着一起重置就是错的。
+  void _autoReopen() => _reopenJournal(manual: false);
+
+  void _reopenJournal({required bool manual}) {
+    if (_disposed || _reopening) return;
+    final sessionId = _sessionId;
+    if (sessionId == null) return;
+    _reopening = true;
+    if (manual) _autoReopenSpent = false;
+    _autoReopenTimer?.cancel();
+    _autoReopenTimer = null;
+
+    _journalSub?.cancel();
+    _journalErrorSub?.cancel();
+    _journal?.cancel();
+    _journal = null;
+    _journalSub = null;
+    _journalErrorSub = null;
+
+    // 旧错误卡是上一次失败的叙述，重试时它该让位给新内容。
+    _bubbles = _bubbles.where((b) => b is! ErrorNotice).toList();
+    _error = null;
+    _loading = true;
+    _armFirstFrameDeadline(sessionId);
+    _subscribeEvents();
+    _openJournal(sessionId);
+
+    _reopening = false;
+    notifyListeners();
+  }
+
   /// D-058: 给这次 `open` 装一个首帧看门狗。
   ///
   /// [_sessionIdAtArm] 是防串门的锚：定时器只为它装的那个会话负责，切走后
@@ -944,7 +1030,24 @@ class ChatController extends ChangeNotifier {
     AppLog.w('chat',
         'first-frame deadline hit (${firstFrameTimeout.inSeconds}s) session=$sessionId');
     notifyListeners();
+
+    // D-104: 文案写着「正在重试」，那就让它真的重试——否则用户在网络恢复后
+    // 永远停在这张卡上（真机：切 tab 不恢复、点卡不响应，只有从会话列表重新
+    // 进入才活）。按错误码表自己的 RetryPolicy 决定要不要自动退避重开，
+    // 且**只做一次**：第二次起必须由用户点按钮，避免 45s 超时循环。
+    if (_error!.retry == RetryPolicy.autoBackoff && !_autoReopenSpent) {
+      _autoReopenSpent = true;
+      AppLog.i('chat', 'auto-reopening journal once after deadline hit');
+      _autoReopenTimer?.cancel();
+      _autoReopenTimer = Timer(_autoReopenBackoff, () {
+        _autoReopenTimer = null;
+        _autoReopen();
+      });
+    }
   }
+
+  /// D-104: 自动重开前的退避间隔。立刻重开等于对着刚超时的链路再敲一次。
+  static const _autoReopenBackoff = Duration(seconds: 3);
 
   /// 测试用：直接触发首帧看门狗。
   @visibleForTesting
@@ -1221,6 +1324,10 @@ class ChatController extends ChangeNotifier {
 
   @override
   void dispose() {
+    // D-104: 不取消的话，这个 Timer 会在 controller 死后调 retry() →
+    // notifyListeners() 打到已 dispose 的 ChangeNotifier 上。
+    _autoReopenTimer?.cancel();
+    _autoReopenTimer = null;
     _disposed = true;
     _lifecycle.removeListener(_onLifecycle);
     _eventsRefreshTimer?.cancel();

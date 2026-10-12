@@ -1,4 +1,4 @@
-# App 端实测踩坑与修复（D-067 ~ D-103）
+# App 端实测踩坑与修复（D-067 ~ D-104）
 
 > 这份文档记录 **Flutter App 在真机上暴露的问题、根因与修复**。每条都是先
 > 实锤根因、再写红测试、最后真机复验的闭环——多数坑的共同点是「看起来是
@@ -319,6 +319,49 @@ logcat 无 flutter 异常。
 丢了，`_loading` 永远停在 true，页面渲染的是 spinner 分支，断言会**假绿**。
 
 **复验**：真机走同一条路径，空会话干净。
+
+### 6.10 vivo（Android 16）复验带出两条：契约已有、实现没有（D-104）
+
+同日 10:0x，把当天全部修复装到 **vivo V2502A / Android 16（SDK 36）** 复验。
+vivo 上装的是前一天凌晨的老包，一轮修复都没进去。跨平台结论：D-102（流式中
+滚动）在 Android 16 上同样成立，工作区/轨迹/团队页都正常。
+
+真正的收获在**断网冷启动**那一步——顺手按出来的缺陷 D-104：
+
+1. **文案说谎**：首帧 45 秒看门狗超时后落一张错误卡，文案是「引擎处理超时，
+   **正在重试**」，而 `_onFirstFrameDeadlinePassed` 设完 `_error` 就结束了，
+   **代码里根本没有重试**。真机表现：网络恢复、mux 重连成功（logcat 有
+   `$events clientId=...`），那张卡**永不消失**；点它无反应、切 tab 往返也
+   无效，只有从会话列表重新进入才活。
+2. **注释也说过头**：`chat_controller.dart` 里写着「The bubble is also the
+   retry affordance」，可 `ErrorNotice` 气泡只印文案、不可点。
+
+**根因不是缺功能，是契约已有、实现没有**：`error_code.dart` 里早就写着
+`ErrorCode.engineTimeout => RetryPolicy.autoBackoff`，只是聊天页没兑现它。
+
+修法：超时后按 `RetryPolicy.autoBackoff` 自动重开一次（3s 退避），错误卡加可点
+的「重试」（重开 journal）。自动重开走**同步**路径而不是 `open()`——`open` 首行
+`await _closeJournal()`，在 widget 测试的 FakeAsync 区里这个 await 永远不完成
+（同 D-103）；顺带给 journal 加了 `_journalGeneration`，关旧流的 `cancel()` 是
+异步的，新流绑定后旧流可能还递上来几帧，按代号不符一律丢弃。
+
+#### 真机当场抓到的第二个 bug：自动重开变成死循环
+
+装包复验时 logcat 直接把循环抖出来了：
+
+```
+10:48:06 first-frame deadline hit → auto-reopening → open journal gen=2
+10:48:54 first-frame deadline hit → auto-reopening → open journal gen=3
+10:49:42 first-frame deadline hit → auto-reopening → open journal gen=4 …
+```
+
+每 48 秒一次，无穷无尽，用户永远只看到一个转圈。起因是我把「手动重试」和
+「自动重开」都接到同一个 `retry()`，而 `retry()` 为了「用户主动点了就给一次
+自动兜底」会重置预算——于是每次自动重开都把预算花光再重置。
+
+**为什么第一版守门没抓住**：那条用例只推进了 4 秒，够验一次自动重开，不够验
+第二次。补了一条「第二次超时不得再自动重开」才咬住（回退验证：follow 次数
+2 → 3，守门红）。教训和 D-102 那条同源——**断言必须覆盖「第二次」**。
 
 ---
 
