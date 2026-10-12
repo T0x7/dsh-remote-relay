@@ -1227,56 +1227,75 @@ class ContextBar extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: AppTheme.line)),
       ),
-      child: Row(
+      // D-105: 拆成两行。
+      //
+      // 单行时只有 agent 名套了 Flexible，百分比和两个胶囊全是固定宽度——屏幕
+      // 一窄，唯一能被压缩的就是 agent 名，于是 `stock-trader` 被截成
+      // `stock…`，而 tok/s、缓存这些装饰性数字占着位置不让位。截断优先级反
+      // 了：第一行独占整行宽度，agent 名拿到它本该拿的待遇；第二行放速率/
+      // 缓存/轮数这些「看一眼就行」的指标，右边留全屏入口。
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // D-076: 本会话所属 agent 预设——「由哪种 agent 处理」的常驻答案。
-          // 数据来自 journal 首帧 header；引擎没给就不显示。
-          if (ratio != null) ...[
-            SizedBox(
-              width: 17,
-              height: 17,
-              child: CircularProgressIndicator(
-                value: ratio,
-                strokeWidth: 2.4,
-                backgroundColor: AppTheme.ink.withValues(alpha: 0.12),
-                valueColor: const AlwaysStoppedAnimation(AppTheme.accent),
-              ),
-            ),
-            const SizedBox(width: AppTheme.xs),
-            Text(l10n.chatContextPercent((ratio * 100).round()),
-                style: const TextStyle(fontSize: 11, color: AppTheme.inkDim)),
-          ] else
-            Text(l10n.chatContextUnknown,
-                style: const TextStyle(fontSize: 11, color: AppTheme.inkDim)),
-          if (controller.sessionPreset != null) ...[
-            Icon(Icons.smart_toy_outlined, size: 12, color: AppTheme.inkDim),
-            const SizedBox(width: 3),
-            Flexible(
-              child: Text(controller.sessionPreset!,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style:
-                      const TextStyle(fontSize: 11, color: AppTheme.inkDim)),
-            ),
-            const SizedBox(width: AppTheme.s),
-          ],
-          if (tokensPerSecond != null) ...[
-            const SizedBox(width: AppTheme.s),
-            _Pill(l10n.chatTokensPerSecond(tokensPerSecond.toStringAsFixed(1))),
-          ],
-          if (cacheHit != null) ...[
-            const SizedBox(width: AppTheme.s),
-            _Pill(l10n.chatCachePercent((cacheHit * 100).round())),
-          ],
-          const Spacer(),
-          if (stats != null)
-            Text(l10n.chatTurnsElapsed(stats.turns),
-                style: const TextStyle(fontSize: 11, color: AppTheme.accent)),
-          if (onTap != null)
-            const Padding(
-              padding: EdgeInsets.only(left: AppTheme.xs),
-              child: Icon(Icons.open_in_full, size: 12, color: AppTheme.inkDim),
-            ),
+          Row(
+            children: [
+              // D-076: 本会话所属 agent 预设——「由哪种 agent 处理」的常驻
+              // 答案。数据来自 journal 首帧 header；引擎没给就不显示。
+              if (ratio != null) ...[
+                SizedBox(
+                  width: 17,
+                  height: 17,
+                  child: CircularProgressIndicator(
+                    value: ratio,
+                    strokeWidth: 2.4,
+                    backgroundColor: AppTheme.ink.withValues(alpha: 0.12),
+                    valueColor: const AlwaysStoppedAnimation(AppTheme.accent),
+                  ),
+                ),
+                const SizedBox(width: AppTheme.xs),
+                Text(l10n.chatContextPercent((ratio * 100).round()),
+                    style: const TextStyle(fontSize: 11, color: AppTheme.inkDim)),
+              ] else
+                Text(l10n.chatContextUnknown,
+                    style: const TextStyle(fontSize: 11, color: AppTheme.inkDim)),
+              if (controller.sessionPreset != null) ...[
+                const SizedBox(width: AppTheme.xs),
+                Icon(Icons.smart_toy_outlined, size: 12, color: AppTheme.inkDim),
+                const SizedBox(width: 3),
+                // 独占一行后常见 agent 名（standard / stock-trader…）都能
+                // 完整显示；真的长到放不下（session-xxx 这种）才截。
+                Flexible(
+                  child: Text(controller.sessionPreset!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 11, color: AppTheme.inkDim)),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: AppTheme.xs),
+          Row(
+            children: [
+              if (tokensPerSecond != null) ...[
+                _Pill(l10n.chatTokensPerSecond(tokensPerSecond.toStringAsFixed(1))),
+                const SizedBox(width: AppTheme.xs),
+              ],
+              if (cacheHit != null)
+                _Pill(l10n.chatCachePercent((cacheHit * 100).round())),
+              const Spacer(),
+              if (stats != null)
+                Text(l10n.chatTurnsElapsed(stats.turns),
+                    style: const TextStyle(fontSize: 11, color: AppTheme.accent)),
+              if (onTap != null)
+                const Padding(
+                  padding: EdgeInsets.only(left: AppTheme.xs),
+                  child:
+                      Icon(Icons.open_in_full, size: 12, color: AppTheme.inkDim),
+                ),
+            ],
+          ),
         ],
       ),
       ),
