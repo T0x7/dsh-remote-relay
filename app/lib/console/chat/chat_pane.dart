@@ -1275,12 +1275,14 @@ class ContextBar extends StatelessWidget {
               ],
             ],
           ),
-          const SizedBox(height: AppTheme.xs),
+          // D-105: 4px 太紧——行距只比行高小一截，两行视觉上糊成一块，
+          // 「拆成两行」就白拆了。
+          const SizedBox(height: AppTheme.s),
           Row(
             children: [
               if (tokensPerSecond != null) ...[
                 _Pill(l10n.chatTokensPerSecond(tokensPerSecond.toStringAsFixed(1))),
-                const SizedBox(width: AppTheme.xs),
+                const SizedBox(width: AppTheme.s),
               ],
               if (cacheHit != null)
                 _Pill(l10n.chatCachePercent((cacheHit * 100).round())),
