@@ -421,7 +421,7 @@ tok/s、缓存两个胶囊，右边留轮数与详情入口。
 | 集成套件多文件同跑 | flutter_tools 通道挂死（单跑全绿）| 逐文件跑 |
 | `adb input swipe` 太快 | 150ms 快甩被系统当误触丢弃、页面纹丝不动 | 用 ≥350ms；否则会误判成「列表卡住」 |
 | VM service 的 `debugPaintBaselinesEnabled` | 截图里**每段文字下都有两条亮黄线**，看起来像样式炸了 | 文字本身的颜色/字号是对的，黄线是 baseline 调试层；重启 App 进程即消失 |
-| 引擎直连好 ≠ 手机端好 | curl `127.0.0.1:3080/api/…` 与 WS mux 秒回，手机同一端点却无响应 | 手机走的是 `https://relay.example.com`（VPS）→ 插件隧道 → 引擎；先确认 `GET /dsh-remote/session` 里的 `tunnel.relayUrl`，别在引擎侧空查 |
+| 引擎直连好 ≠ 手机端好 | curl `127.0.0.1:3080/api/…` 与 WS mux 秒回，手机同一端点却无响应 | 手机走的是你自己的中继 VPS → 插件隧道 → 引擎；先确认 `GET /dsh-remote/session` 里的 `tunnel.relayUrl`，别在引擎侧空查 |
 | `applyFrame` 的通知被 48ms 合并定时器延后 | widget 测试里 `pump()` 零时长后断言「UI 应该更新了」——其实通知还没发出，守门一片假绿 | 推时钟：`pump(100ms)`；`ChatController._scheduleStreamPaint` |
 | 懒加载 ListView 的 `maxScrollExtent` 对「往已有气泡追加内容」不增长 | 拿 `pixels` 与 `maxScrollExtent` 的差值当断言基准会踩到边界/空断言 | 用**不变量**断言（手势往下拖 pixels 只许变小）；要真让列表变高得推**新 durable 记录**（新 item）|
 | `testWidgets` 里对同一 controller 二次 `open()` | 直接 `await` 会把测试吊死（`open` 首行 `await _closeJournal()`）；改用 `runAsync` 后又可能**假绿**——帧在订阅循环起来前就被丢掉，`loading` 停在 true，页面渲染 spinner 分支 | `open` + `pushFrame` **都放进同一个 `tester.runAsync` 内部**；跑前先断言 `loading=false && list=1`，别让它用 spinner 分支蒙过去 |
