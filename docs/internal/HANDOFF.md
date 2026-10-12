@@ -57,51 +57,7 @@ pnpm verify
 
 | 提交 | 日期 | 痕迹 |
 |---|---|---|
-| `606f5d18` | 2026-10-08 | 消息体写了 `/Users/<用户名>/…` 的真实家目录前缀 |
-| `0c2b296a` | 2026-10-05 | 消息体写了 `HTTPS_PROXY=127.0.0.1:7897` 本地代理端口 |
-| `3327740f` | 2026-10-05 | 消息体写了 `0.0.0.0:8080` 与 `172.28.0.0/24` |
-
-**没有**任何密钥、token、真实 relay 域名或 VPS 地址进过历史（`*.pem` / `.env` /
-证书从未被提交过）。这三条本身也不致命——真要修，`git filter-repo` 只改消息体即可；
-选择压成单提交是因为那 106 条里最有价值的是**设计决定**而非时间线，而决定都写进了
-本仓文档（`CONTRIBUTING.md`、勘误表、`app/PROGRESS.md`）。
-
-那 106 条历史保留在本地分支 **`archive/full-history`** 上，仅供参考：
-
-```bash
-git log archive/full-history --oneline | head   # 查得到
-# 但不要推：git push origin archive/full-history   ← 会把痕迹一起公开
-```
-
-## 测试现状与分层
-
-| 包 | 结果 |
-|---|---|
-| server | 90 passed（90） |
-| client | 13 passed（13） |
-| plugin | 38 passed / 15 skipped（53） |
-
-plugin 的 15 个 skip 是**设计行为**——缺依赖时打印原因而非失败：宿主半边（8，需 devDeps）、构建产物（6，需先 `pnpm build`）、loader REAL-composition 主体（1，需 `dsh-loader-smoke` + dsh 在 PATH）。装完依赖 + 构建后应全部转绿，届时 **0 skip 才算验证通过**。
-
-分层依据 dsh 官方测试规范（产品可见插件必须用真实 Loader 启动测试专用 `cordis.yml` 做 REAL-composition 测试，手工 `ctx.plugin(...)` 不算数）。官方工具是 `@deepseek-ai/dsh-loader-smoke`（已发 npm）。
-
-## 接手前必须知道的三个设计决定
-
-### ① tunnel 只有一份，在 client/ —— 别拷贝
-
-`plugin/` 从 `client/` import `RemoteTunnelClient`，不 vendor 一份。历史上出现过两份实现分叉 289 行（净 +96）的事故，且分叉方向是旧副本丢失了跨进程配对收养逻辑。拷贝式管理就是那个失败模式的现场。
-
-### ② 本仓不耦合任何私有部署 —— 别把耦合加回来
-
-- server 不注册任何特定部署的显式路由前缀（`/*` 通配 + 全局 `onRequest` 闸门已覆盖全部行为，测试证实）
-- WS 桥接路径白名单是配置项 `RELAY_WS_BRIDGE_PATHS`（CSV，默认空），不是硬编码清单
-- client `tokenRewritePrefixes` 默认空，按需配置
-- plugin `AUTH_PREFIXES` 只含 `['/api/', '/dsh-remote/']`
-- tsconfig 不含任何仓外 path alias；需要 dsh 类型时一律用 npm 上的 `@deepseek-ai/*` 包
-
-**约束**：代码、构建、路由、配置都不得引用私有仓路径或私有路由名。
-
-> 例外说明：`server/live-smoke.mjs` 默认读 `~/.dsh-host/engine.token`——这不是私有耦合，是 dsh 引擎自身硬编码的 token 落盘位置（上游 `browser-auth.ts` 同路径），脚本提供 `DSH_ENGINE_TOKEN_FILE` 环境变量覆盖。
+| `606f5d18` | 2026-10-08 | 消息体写了 `/Users/<用户名>> 例外说明：`server/smoke/harness.mjs` 探测引擎 token 的落盘位置（现行 `~/.dsh/engine.token`，外加一个 legacy 宿主目录）——这不是私有耦合，是 dsh 引擎自身的 token 落盘约定；脚本另提供 `DSH_ENGINE_TOKEN_FILE` 覆盖。注意冒烟用的 publicHost 必须落在引擎 trusted-host 里，否则用 `DSH_SMOKE_PUBLIC_HOST` 指定部署时的中继域名。
 
 ### ③ `enabled` 默认 `false`
 

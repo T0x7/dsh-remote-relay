@@ -196,8 +196,12 @@ audit DB, not the log stream.
 
 ```bash
 pnpm build
-node live-smoke.mjs   # needs a real dsh on 127.0.0.1:3080 + engine.token on disk
+npm run smoke:relay    # relay 自身的契约（需真实 dsh + engine.token）
+npm run smoke:engine   # 引擎契约清单（随引擎版本变，需 DSH_SMOKE_PUBLIC_HOST）
 ```
+
+两册的区别与各自跑法见 [docs/testing.md](../docs/testing.md)。带引擎的那两册**手动跑**，
+不进 CI；CI 跑的是 `scripts/e2e-stub.sh`（上游是桩，与引擎无关）。
 
 Overridables: `RELAY_PSK`, `RELAY_PUBLIC_HOST`, `DSH_ENGINE_PORT`,
 `DSH_ENGINE_TOKEN_FILE`.
