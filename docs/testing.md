@@ -17,6 +17,8 @@
 
 `server/tests/relay.spec.ts`，纯协议/状态机验证，全部用 fixture，**不碰网络**。改 relay 内部逻辑时跑它——秒级。
 
+同目录还有 `server/tests/boot-side-effect.spec.ts`：spawn 一个只 `import dist/index.js` 的子进程，断言它**能自行退出**且**不留下监听**。这条守的是「import 本模块的工具不会顺带启动一台幽灵 relay」——它曾经让 `smoke:relay` 断言全绿之后永不退出。详见 [ADR 2026-10-13](decisions/2026-10-13-import-no-boots-relay.md)。
+
 ```bash
 pnpm --filter dsh-remote-relay test
 ```
@@ -40,6 +42,9 @@ bash scripts/e2e-stub.sh    # 通过时退出码 0，并打印 OK
 ```bash
 npm run smoke:engine        # 需要本机有真实 dsh 在跑
 ```
+
+两册都是**跑完自行退出、通过时退出码 0**（这条以前不成立：断言全绿之后进程会挂住
+不退出，只能 Ctrl-C——根因与修法见 [ADR 2026-10-13](decisions/2026-10-13-import-no-boots-relay.md)）。
 
 同目录还有 `smoke/relay.mjs`（`npm run smoke:relay`），走同样的真实链路，但只断言 **relay 自己**该保证的东西（健康探针、注册握手、着陆发 cookie、WSS 数据面送达、设备列表自识别）——**与引擎版本无关**，是 L3 的稳定子集。
 

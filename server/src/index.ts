@@ -7,7 +7,7 @@ import type { Duplex } from 'node:stream';
 import http from 'node:http';
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from 'node:http';
 import crypto from 'node:crypto';
-import { URL } from 'node:url';
+import { URL, pathToFileURL } from 'node:url';
 import { SessionManager } from './session.js';
 import { SessionStore } from './store.js';
 import { RelayAuditLogger } from './audit.js';
@@ -438,7 +438,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
   //    query 验证 + pairing cookie 颁发 + /auth 跳板都在 onRequest 根路径
   //    闸门里完成，见下文「根路径着陆闸门」）。旧 share-link（30 分钟 TTL）
   //    早已全部自然过期，无兼容存量；相关 verifyShareLink / PAIR_ONLINE_HTML
-  //    / 在线拦截 / 着陆轮换密钥逻辑一并移除。ADR 2026-09-15-relay-pair-retirement。
+  //    / 在线拦截 / 着陆轮换密钥逻辑一并移除。
+  //    ADR: docs/decisions/2026-09-15-relay-pair-retirement.md
 
   // 6. Session-cookie gate: ALL paths except GATE_EXEMPT_PATHS (liveness +
   //    QR landing). Two failure shapes:
@@ -926,8 +927,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
       // 产物,内容一致;仅用于 SPA 首屏加载,不含 /api 数据)。
       // v3.176.1：/plugins/* 同级回落——首屏 preload 脚本(script 标签)无凭证,
       // 与 /assets/* 同为公开构建产物(详见 gate 处注释)。
-      // v3.203：/auth 同级回落（回填线上热修 Patch B，ADR 2026-09-14-relay-
-      // remote-control-url-fix）——着陆 302 跳板的 /auth 正常浏览器会带上刚
+      // v3.203：/auth 同级回落（回填线上热修 Patch B，ADR
+      // docs/decisions/2026-09-14-relay-remote-control-url-fix）——着陆 302
+      // 跳板的 /auth 正常浏览器会带上刚
       // 颁的 pairing cookie 走 per-pairing 路由；此回落只兜极端 cookie 丢失
       // （隐私模式拦截重定向链 Set-Cookie 等），引擎 cookie 单独过不了闸门。
       // 注意 req.url 含 query(如 /?sessionId=...&hash=...)——判 path 必须剥 query。
@@ -1571,7 +1573,24 @@ wssNoServer.handleUpgrade(pendingWs.req, pendingWs.socket, pendingWs.head, (brow
 return { fastify, sessionManager, auditLogger, _markStreamActive, _markStreamInactive, wsTunnelServer, wssNoServer };
 }
 
-if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+/**
+ * 只有当本模块就是**进程入口**时才自启 relay。
+ *
+ * `buildServer` 是库形态：smoke、一次性诊断脚本都会 import 这个模块。原来的
+ * `NODE_ENV !== 'test'` 守卫挡不住它们——`server/smoke/harness.mjs` import 之后
+ * 会**顺带 listen 默认端口 8080**，于是一台谁也没关的幽灵 relay 占着端口，且
+ * 进程永不退出：`smoke:relay` 5 条断言全绿、打印 OK 之后卡住不动，只能 Ctrl-C。
+ * 将来任何 import 本模块的工具都会踩同一个坑（症状还特别隐蔽：断言全绿）。
+ *
+ * 判定用「是不是进程入口」而不是环境变量：环境变量是「调用方要记得配」的约定，
+ * 入口判定是 Node 自己的事实。直接 `node dist/index.js` 启动（Dockerfile CMD、
+ * npm start、e2e-stub.sh、Dart 集成测试台的 spawn）行为完全不变。
+ */
+const isProcessEntry = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isProcessEntry && process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
   const config = loadConfig();
   // Fail-closed boot: refuse to serve on the default PSK or without a pinned
   // public Host — both silently break the two-gate trust model.

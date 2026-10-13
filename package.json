@@ -13,7 +13,7 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "verify": "bash scripts/verify.sh",
-    "e2e": "bash scripts/e2e-smoke.sh"
+    "e2e": "bash scripts/e2e-stub.sh"
   },
   "engines": {
     "node": ">=22.0.0"

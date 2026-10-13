@@ -10,7 +10,7 @@
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP=$(mktemp -d /tmp/dsh-relay-e2e2.XXXXXX)
 OUT=$TMP/result.txt
-PSK="e2e-smoke-psk-$RANDOM"
+PSK="e2e-stub-psk-$RANDOM"
 cleanup() { pkill -P $$ 2>/dev/null; lsof -ti :8083 -ti :9998 2>/dev/null | xargs kill 2>/dev/null; }
 trap cleanup EXIT
 

@@ -427,7 +427,8 @@ export class RemoteTunnelClient {
    *
    * history：v3.171 曾有 mintShareLink()（/__pair 着陆 + 30 分钟 TTL 的
    * 分享链接），v3.176 QR 全面切根路径 URL 会话后无调用方，v3.203 删除
-   * （/__pair 端点同步退役，见 ADR 2026-09-15-relay-pair-retirement）。
+   * （/__pair 端点同步退役，见
+   * docs/decisions/2026-09-15-relay-pair-retirement.md）。
    */
   /** v3.176:构造根路径签名 URL——mintUrlSession 与 createSession 的 QR 共用。
    *  `/?sessionId&hash&t&exp&mid[&name][&app_version]`,SPA 打开即注入

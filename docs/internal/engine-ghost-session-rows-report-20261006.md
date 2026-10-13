@@ -7,8 +7,10 @@
 
 ## 0. 更正（2026-10-06 晚，host-app 侧已定位真因并修复）
 
-本报告 §2 第 3 点「来源 A」的机制判断**有误**，已被 host-app 同日的
-`docs/decisions/2026-10-06-dsh-import-header-title-invisible.md`（ADR，v3.273）推翻并修正：
+本报告 §2 第 3 点「来源 A」的机制判断**有误**，已被 host-app 仓同日的 ADR
+（`host-app:docs/decisions/2026-10-06-dsh-import-header-title-invisible.md`，
+v3.273；`host-app:` 前缀表示该文件在 host-app 仓、不在本仓，见
+`docs/decisions/README.md` 的「跨仓引用」）推翻并修正：
 
 - ~~「引擎没有目录 watcher，直写文件永不索引」~~ —— 不成立。引擎 `session/list`
   每次调用**零缓存全量重扫**目录树（v3.269 补丁注释原话），无需 watcher；同一条
