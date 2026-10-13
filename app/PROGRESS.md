@@ -985,3 +985,28 @@ app 全量 497/497。
 那张「已过期 · 点击重新配对」的卡，audit 落 `cause=expired`。
 **守门**：4 条，核心断言是那句谎话 `findsNothing`；回退即红（摘掉判定立刻抓到
 `Found 1 widget with text "连接已断开，正在重连…"`）。app 全量 501/501。
+
+### D-111 不会错过的续期流程：relay 为「重铸凭证」单端点开口子
+
+用户的追问把这件事从「诊断」推到了「设计」：为啥会错过？能不能设计成不会错过？
+
+**实验没跑，因为答案在代码里**：`server/src/index.ts` 的
+`verifyUrlSessionToken` 三条 `return null`（过期 / mint 老过 30 天 / session 不存在）
+决定了过期凭证必然被拒，而 App 的 `_realMint` 恰恰用旧 bearer 调这个端点——先有鸡
+还是先有蛋。所以「错过窗口 = 终局」是**协议无解**，不是 App 偷懒。
+
+更根本的问题：TTL 24h + T-2h 窗口 = **这把钥匙的寿命取决于用户有没有恰好在第
+22 小时打开过 App**。对远程控制 App 来说这个要求本身荒谬。
+
+**改法（只放宽一条）**：relay 新增 `verifyUrlSessionTokenForRearm`，仅对精确路径
+`/dsh-remote/url-session` 放行「已过期但签名对 / 未吊销 / 未过 30 天 cap」的凭证，
+让 App 能铸出下一把钥匙。数据面、吊销、30 天 cap、时钟漂移全部照旧。
+App 侧：`sweep()` 不再跳过过期条目（带 5min→30min→2h 退避），且**续期成功与失败
+都记 audit**。
+
+**守门**：relay 5 条（含「口子不救吊销 / 不救篡改 / 不救超 30 天 / 路径精确匹配 /
+数据面照旧 401」）+ App 4 条；两端回退即红均验过。既有单测
+`expired machine is not renewed` 被显式改写并注明理由。server 97/97，app 504/504。
+
+**待决**：部署到 VPS 做真机端到端自愈验证——relay 是生产容器（Up 8 天 healthy），
+重启会短暂打断那台**当前连接正常**的手机，等用户拍板。

@@ -41,6 +41,14 @@ const FAVICON_ICO_BYTES = Buffer.from([
 const SHARE_LINK_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 const SHARE_LINK_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
 
+/**
+ * D-111：唯一享受「过期凭证也能过闸门」待遇的路径。
+ *
+ * 精确匹配（不是前缀），否则 `/dsh-remote/url-session-something` 这类路径会跟着
+ * 一起被放宽——口子必须窄到「只能铸出下一把钥匙」。
+ */
+const URL_SESSION_REARM_PATH = '/dsh-remote/url-session'
+
 // v3.172：per-pairing cookie 命名空间化（Plan A：浏览器一窗口多 pairing）。
 // cookie 名格式 `dsh_remote_session__<sessionId>`——同一浏览器可同时持有
 // N 条 pairing cookie（每 pairing 一条），命名空间互不撞。
@@ -169,6 +177,57 @@ function verifyUrlSessionToken(auth: string, psk: string, sessionManager: Sessio
   const b = Buffer.from(hash)
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null
   // session 存活(未撤销 / 未过期)
+  if (!sessionManager.getSession(sid)) return null
+  return sid
+}
+
+/**
+ * D-111：只为**重铸凭证**这一个端点放宽「exp 已过」这一项。
+ *
+ * **为什么要有这个口子。** URL 会话的 TTL 只有 24h，App 靠「过期前 2h 续期」
+ * 续命——也就是说**这把钥匙的寿命，取决于用户有没有恰好在第 22 小时打开过
+ * App**。错过一次窗口就是终局：`_realMint`（App 侧 `session_scheduler.dart`）
+ * 用**旧 bearer** 调 `GET /dsh-remote/url-session` 铸新链接，而闸门
+ * [verifyUrlSessionToken] 第一条就是 `if (now > exp) return null`——**换钥匙的
+ * 门要用旧钥匙开**，先有鸡还是先有蛋。
+ *
+ * 真机代价（小米 2109119BC）：一台没在正确时间打开过 App 的手机，凭证静静过期，
+ * 控制台永远挂着「正在重连…」，而重连永远不会成功。
+ *
+ * **口子有多窄**（安全边界，务必保持）：
+ * 1. 只对 `/dsh-remote/url-session` 生效——**铸不出任何业务数据**；
+ * 2. 仍然要求签名正确（HMAC 比对在下面，一字不改）；
+ * 3. 仍然要求 session 在 relay 侧存活（未撤销）；
+ * 4. 仍然要求 mint 不老于 30 天 cap（和 `SHARE_LINK_MAX_AGE_MS` 同一条），
+ *    所以**过了 30 天上限的凭证照样进不来**——这个口子是「续命」，不是「复活」；
+ * 5. 铸出来的新 bearer 照旧 24h，走的仍是完整闸门。
+ *
+ * 换句话说：放宽的只有「过期 ≠ 立即失效」这一条，其余全部照旧。
+ */
+function verifyUrlSessionTokenForRearm(
+  auth: string,
+  psk: string,
+  sessionManager: SessionManager,
+): string | null {
+  const parts = auth.slice('Bearer '.length).split('.')
+  if (parts.length !== 5) return null
+  const [sid, exp, mid, t, hash] = parts as [string, string, string, string, string]
+  if (!/^sess_[A-Za-z0-9_-]+$/.test(sid)) return null
+  if (!/^[0-9]{1,20}$/.test(exp) || !/^[0-9]{1,20}$/.test(t)) return null
+  if (!/^[a-f0-9]{64}$/.test(mid)) return null
+  if (!/^[A-Za-z0-9_-]{43}$/.test(hash)) return null
+  const now = Date.now()
+  const tMs = Number(t)
+  // 唯一被放宽的：**没有** `if (now > Number(exp)) return null`。
+  if (now - tMs > SHARE_LINK_MAX_AGE_MS) return null // 30 天 cap 照旧
+  if (tMs - now > SHARE_LINK_MAX_FUTURE_SKEW_MS) return null // 时钟漂移照旧
+  const expected = createHmac('sha256', psk)
+    .update([sid, exp, mid, t].join('|'))
+    .digest('base64url')
+  const a = Buffer.from(expected)
+  const b = Buffer.from(hash)
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null
+  // 撤销 / 不存在 → 照旧拒。这个口子救的是「过期」，救不了「被吊销」。
   if (!sessionManager.getSession(sid)) return null
   return sid
 }
@@ -581,6 +640,23 @@ export async function buildServer(options: BuildServerOptions = {}) {
         (req as unknown as { urlSessionId?: string }).urlSessionId = sessionId;
         sessionManager.markSeen(sessionId, req.ip);
         return;
+      }
+      // D-111：exp 过了但签名对、session 还在、30 天 cap 未到 → 只放行「重铸凭证」
+      // 这一个端点。path 精确匹配，其它一切（含全部数据面）照旧 401。
+      if (path === URL_SESSION_REARM_PATH) {
+        const rearmId = verifyUrlSessionTokenForRearm(auth, psk, sessionManager);
+        if (rearmId) {
+          (req as unknown as { urlSessionId?: string }).urlSessionId = rearmId;
+          sessionManager.markSeen(rearmId, req.ip);
+          auditLogger.log({
+            eventType: 'api_auth_url_session_rearm',
+            ip: req.ip,
+            userAgent: req.headers['user-agent'],
+            details: `${path} expired-token rearm for sid=${rearmId}`,
+          });
+          logger.info({ sid: rearmId }, 'url_session_rearm_expired_token_allowed');
+          return;
+        }
       }
       auditLogger.log({
         eventType: 'api_auth_missing',

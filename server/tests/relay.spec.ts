@@ -1708,6 +1708,7 @@ describe('per-pairing cookie + X-Pairing-Id (v3.172 Plan A)', () => {
 describe('URL session token (v3.173 第三条路)', () => {
   let fastifyInstance: any
   let auditLogger: any
+  let sessionManager: any
   const { dbPath, stateDbPath } = tmpDb('relay-url-session')
   let port: number
 
@@ -1718,6 +1719,7 @@ describe('URL session token (v3.173 第三条路)', () => {
     const server = await buildServer({ psk: TEST_PSK, dbPath, stateDbPath, upstream: DEAD_UPSTREAM, publicHost: PUBLIC_HOST })
     fastifyInstance = server.fastify
     auditLogger = server.auditLogger
+    sessionManager = server.sessionManager
     await fastifyInstance.listen({ port: 0, host: '127.0.0.1' })
     port = (fastifyInstance.server.address() as any).port
   })
@@ -1767,6 +1769,96 @@ describe('URL session token (v3.173 第三条路)', () => {
     expect(await res.text()).toBe('ok-tok1')
     ws.close()
     expect(sid).toBeTruthy()
+  })
+
+  // ---- D-111：过期凭证只对「重铸凭证」这一个端点开口子 ----
+  //
+  // 背景：URL 会话 TTL 只有 24h，App 靠「过期前 2h 续期」续命，也就是这把钥匙的
+  // 寿命取决于用户有没有恰好在第 22 小时打开过 App。错过一次窗口就是终局——
+  // 换钥匙的门要用旧钥匙开。真机（小米 2109119BC）代价：凭证静静过期，控制台
+  // 永远挂着「正在重连…」，而重连永远不会成功。
+
+  /** 铸一把**已过期**但签名正确的 bearer（exp 在过去，mint 仍在 30 天 cap 内）。 */
+  function expiredBearer(sid: string, mid: string): string {
+    const t = Date.now() - 3 * 60 * 60 * 1000 // 3 小时前铸的
+    const exp = t + 60 * 60 * 1000 // 1h TTL → 2 小时前就过期了
+    const hash = crypto.createHmac('sha256', TEST_PSK)
+      .update([sid, exp, mid, t].join('|')).digest('base64url')
+    return `${sid}.${exp}.${mid}.${t}.${hash}`
+  }
+
+  it('D-111 过期凭证 → 只有 /dsh-remote/url-session 能过去闸门', async () => {
+    const { sid, ws, bearer } = await regSession('rearm1')
+    const [, , mid] = bearer.split('.')
+    const stale = expiredBearer(sid, mid!)
+
+    // 数据面照旧 401 —— 放宽的只有「铸出下一把钥匙」这一件事。
+    const data = await fetch(`http://127.0.0.1:${port}/api/version`, {
+      headers: { authorization: `Bearer ${stale}` },
+    })
+    expect(data.status).toBe(401)
+
+    // 重铸端点过了闸门（上游是 DEAD_UPSTREAM，所以这里断言「不是 401」——
+    // 真正验的是闸门放行了，铸不铸得出来是引擎侧的事）。
+    const rearm = await fetch(`http://127.0.0.1:${port}/dsh-remote/url-session`, {
+      headers: { authorization: `Bearer ${stale}` },
+    })
+    expect(rearm.status).not.toBe(401)
+    ws.close()
+  })
+
+  it('D-111 口子不救「被吊销」：session 不在 → 照旧 401', async () => {
+    const { sid, ws, bearer } = await regSession('rearm2')
+    const [, , mid] = bearer.split('.')
+    const stale = expiredBearer(sid, mid!)
+    sessionManager.revokeSession(sid, 'test')
+
+    const rearm = await fetch(`http://127.0.0.1:${port}/dsh-remote/url-session`, {
+      headers: { authorization: `Bearer ${stale}` },
+    })
+    expect(rearm.status).toBe(401)
+    ws.close()
+  })
+
+  it('D-111 口子不救「签名被篡改」：hash 换假值 → 照旧 401', async () => {
+    const { sid, ws, bearer } = await regSession('rearm3')
+    const [, exp, mid, t] = bearer.split('.')
+    const tampered = `${sid}.${exp}.${mid}.${t}.${'A'.repeat(43)}`
+
+    const rearm = await fetch(`http://127.0.0.1:${port}/dsh-remote/url-session`, {
+      headers: { authorization: `Bearer ${tampered}` },
+    })
+    expect(rearm.status).toBe(401)
+    ws.close()
+  })
+
+  it('D-111 口子是「续命」不是「复活」：mint 老过 30 天 cap → 照旧 401', async () => {
+    const { sid, ws, bearer } = await regSession('rearm4')
+    const [, , mid] = bearer.split('.')
+    // 31 天前铸的、早就过期 —— 超了 SHARE_LINK_MAX_AGE_MS。
+    const t = Date.now() - 31 * 24 * 60 * 60 * 1000
+    const exp = t + 60 * 60 * 1000
+    const hash = crypto.createHmac('sha256', TEST_PSK)
+      .update([sid, exp, mid, t].join('|')).digest('base64url')
+    const ancient = `${sid}.${exp}.${mid}.${t}.${hash}`
+
+    const rearm = await fetch(`http://127.0.0.1:${port}/dsh-remote/url-session`, {
+      headers: { authorization: `Bearer ${ancient}` },
+    })
+    expect(rearm.status).toBe(401)
+    ws.close()
+  })
+
+  it('D-111 口子精确匹配：/dsh-remote/url-sessionX 不跟着放宽', async () => {
+    const { sid, ws, bearer } = await regSession('rearm5')
+    const [, , mid] = bearer.split('.')
+    const stale = expiredBearer(sid, mid!)
+
+    const lookalike = await fetch(`http://127.0.0.1:${port}/dsh-remote/url-sessionX`, {
+      headers: { authorization: `Bearer ${stale}` },
+    })
+    expect(lookalike.status).toBe(401)
+    ws.close()
   })
 
   // ---- v3.183：根路径着陆闸门（裸 / 不再免鉴权）----
