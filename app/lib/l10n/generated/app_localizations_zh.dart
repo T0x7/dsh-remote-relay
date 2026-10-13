@@ -1190,6 +1190,29 @@ class L10nZh extends L10n {
   String get diagnosticsShareSubject => 'dsh remote 诊断日志';
 
   @override
+  String get authCauseExpired => '会话已过期';
+
+  @override
+  String get authCauseRevoked => '凭证已被吊销';
+
+  @override
+  String get authCauseMaxAge => '已超过 30 天上限';
+
+  @override
+  String get authCauseUnknown => '原因未知';
+
+  @override
+  String get consoleCredentialDead => '凭证已失效，不会自动恢复';
+
+  @override
+  String consoleCredentialDeadWhy(Object cause) {
+    return '$cause · 需要重新配对才能继续';
+  }
+
+  @override
+  String get consoleGoRepair => '去重新配对';
+
+  @override
   String get diagnosticsChannelLabel => '日志通道';
 
   @override

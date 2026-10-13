@@ -46,6 +46,7 @@ class ConsolePage extends StatefulWidget {
     this.gatewayFactory,
     this.titleCache,
     this.lastSession,
+    this.onShowMachines,
   });
 
   final MachinesStore store;
@@ -59,6 +60,11 @@ class ConsolePage extends StatefulWidget {
 
   /// D-109：「上次看的会话」记忆。null = inMemory（测试与不需要持久化的调用方）。
   final LastSessionStore? lastSession;
+
+  /// D-110：凭证终态失效时横幅上那个**唯一主行动**的落点——跳回机器页，
+  /// 那里才有重新配对的流程（design §7.2：会话失效属 L1，唯一主行动）。
+  /// null = 没有出路（测试与没接 AppRoot 的调用方），此时横幅仍然不谎称重连。
+  final VoidCallback? onShowMachines;
 
   @override
   State<ConsolePage> createState() => _ConsolePageState();
@@ -254,6 +260,40 @@ class _ConsolePageState extends State<ConsolePage> {
       if (mounted) setState(() {});
     }
   }
+
+  /// D-110：这台机器的凭证是不是**终态**失效（重连无望）。
+  ///
+  /// 判据是本地的时钟，不是等一次失败往返：`_realMint` 用**旧 bearer** 调
+  /// `GET /dsh-remote/url-session` 铸新链接（`session_scheduler.dart:81`），
+  /// 所以过期之后连「换一把钥匙」的门都锁着——等下去不会好，只会一直挂着
+  /// 「正在重连…」。
+  ///
+  /// 只在绑定机器之后才判；`null` = 凭证还活着（或者压根没绑定），横幅照旧按
+  /// carrier 状态显示「自愈中」。
+  AuthCause? _terminalAuthCause() {
+    final machine = _machine;
+    if (machine == null) return null;
+    final clock = SessionClock(
+      expMs: machine.params.expMs,
+      firstPairedMs: machine.firstPairedMs,
+    );
+    final now = DateTime.now();
+    if (!clock.isExpired(now)) return null;
+    final cause = clock.diagnose401(now);
+    if (cause == AuthCause.unknown) return null;
+    // 只在**首次**判定时记一行：每次 build 都记会把 audit 通道刷爆，而
+    // 「为什么一直连不上」恰恰需要这行。
+    if (cause != _loggedTerminalCause) {
+      _loggedTerminalCause = cause;
+      AppLog.audit('machine.credential.dead', attrs: {
+        'machine': machine.id,
+        'cause': cause.name,
+      });
+    }
+    return cause;
+  }
+
+  AuthCause? _loggedTerminalCause;
 
   /// D-109：冷启动该开哪个。
   ///
@@ -577,7 +617,12 @@ class _ConsolePageState extends State<ConsolePage> {
           // just stopped updating while prompts kept succeeding over unary
           // HTTP, so the console looked alive but was blind.
           if (_muxState != MuxState.connected && _machine != null)
-            _ReconnectBanner(state: _muxState, l10n: l10n),
+            _ReconnectBanner(
+              state: _muxState,
+              l10n: l10n,
+              deadCause: _terminalAuthCause(),
+              onGoRepair: widget.onShowMachines,
+            ),
           _SegmentBar(
             index: _segment,
             labels: [
@@ -720,16 +765,41 @@ class _MachineChip extends StatelessWidget {
 /// D-027 — says the carrier is down instead of letting the conversation look
 /// alive-but-frozen. `warn` while backing off, `accent` for the 4001 heal,
 /// which the relay uses when another device took the pairing.
+/// D-110：横幅分两种，**「能自愈」和「已经没救了」必须说不一样的话**。
+///
+/// 原来的条件只有 `_muxState != connected`，于是凭证终态失效（`_realMint` 用
+/// 旧 bearer 铸新链接 ⇒ 过期后连换凭证的门都锁着，见 `session_scheduler.dart:81`）
+/// 也会永远挂上「连接已断开，正在重连…」。这句话承诺了「正在重连」，而真实情况
+/// 是**永远重连不成**——D-104「文案写着正在重试，那就让它真的重试」的第四例。
+///
+/// 而且分层也错了：design §7.2 写明**会话失效属 L1 全屏页（红，唯一主行动）**，
+/// L3 横幅是「自动消失」的层级。给终态挂一个自愈横幅，用户等多久都等不到。
 class _ReconnectBanner extends StatelessWidget {
-  const _ReconnectBanner({required this.state, required this.l10n});
+  const _ReconnectBanner({
+    required this.state,
+    required this.l10n,
+    this.deadCause,
+    this.onGoRepair,
+  });
 
   final MuxState state;
   final L10n l10n;
 
+  /// 非 null = 这台机器的凭证已经终态失效（重连无望），值是三因判别的结果。
+  final AuthCause? deadCause;
+
+  /// 终态时给用户的那**唯一**主行动（跳回机器页去重新配对）。
+  final VoidCallback? onGoRepair;
+
   @override
   Widget build(BuildContext context) {
+    final dead = deadCause != null;
     final healing = state == MuxState.healing;
-    final color = healing ? AppTheme.accent : AppTheme.warn;
+    final color = dead
+        ? AppTheme.danger
+        : healing
+            ? AppTheme.accent
+            : AppTheme.warn;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(
@@ -740,19 +810,60 @@ class _ReconnectBanner extends StatelessWidget {
           SizedBox(
             width: 12,
             height: 12,
-            child: CircularProgressIndicator(strokeWidth: 2, color: color),
+            // 终态没有「正在自愈」这回事——转圈就是在骗人。
+            child: dead
+                ? Icon(Icons.link_off_rounded, size: 12, color: color)
+                : CircularProgressIndicator(strokeWidth: 2, color: color),
           ),
           const SizedBox(width: AppTheme.s),
           Expanded(
-            child: Text(
-              healing ? l10n.err_ws_device_replaced : l10n.consoleReconnecting,
-              style: TextStyle(fontSize: 11.5, color: color),
-            ),
+            child: dead
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(l10n.consoleCredentialDead,
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: color)),
+                      Text(
+                          l10n.consoleCredentialDeadWhy(_causeText(deadCause!)),
+                          style: TextStyle(
+                              fontSize: 10.5, color: color.withValues(alpha: .8))),
+                    ],
+                  )
+                : Text(
+                    healing ? l10n.err_ws_device_replaced : l10n.consoleReconnecting,
+                    style: TextStyle(fontSize: 11.5, color: color),
+                  ),
           ),
+          if (dead && onGoRepair != null) ...[
+            const SizedBox(width: AppTheme.s),
+            TextButton(
+              onPressed: onGoRepair,
+              style: TextButton.styleFrom(
+                foregroundColor: color,
+                padding: const EdgeInsets.symmetric(horizontal: AppTheme.s),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(l10n.consoleGoRepair,
+                  style: const TextStyle(fontSize: 11.5)),
+            ),
+          ],
         ],
       ),
     );
   }
+
+  /// 三因判别（design §7.2：401→`auth.expired`/`.revoked`/`.max_age`）。这里说
+  /// 人话，不把 code 甩给用户——但 code 进日志，方便回溯。
+  String _causeText(AuthCause cause) => switch (cause) {
+        AuthCause.expired => l10n.authCauseExpired,
+        AuthCause.revoked => l10n.authCauseRevoked,
+        AuthCause.maxAge => l10n.authCauseMaxAge,
+        AuthCause.unknown => l10n.authCauseUnknown,
+      };
 }
 
 class _SegmentBar extends StatelessWidget {

@@ -109,6 +109,10 @@ class _AppRootState extends State<AppRoot> {
               gatewayFactory: widget.gatewayFactory,
               titleCache: widget.titleCache,
               lastSession: widget.lastSession,
+              // D-110：终态失效时横幅上那个「去重新配对」的落点。
+              onShowMachines: () {
+                if (mounted) setState(() => _tab = 0);
+              },
             )
           : const _ConsoleDeferred(),
       SettingsPage(

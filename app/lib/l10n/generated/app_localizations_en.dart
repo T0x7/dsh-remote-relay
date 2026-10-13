@@ -1256,6 +1256,30 @@ class L10nEn extends L10n {
   String get diagnosticsShareSubject => 'dsh remote diagnostics log';
 
   @override
+  String get authCauseExpired => 'Session expired';
+
+  @override
+  String get authCauseRevoked => 'Credential revoked';
+
+  @override
+  String get authCauseMaxAge => 'Past the 30-day cap';
+
+  @override
+  String get authCauseUnknown => 'Cause unknown';
+
+  @override
+  String get consoleCredentialDead =>
+      'Credential expired — it will not recover on its own';
+
+  @override
+  String consoleCredentialDeadWhy(Object cause) {
+    return '$cause · re-pair to continue';
+  }
+
+  @override
+  String get consoleGoRepair => 'Re-pair now';
+
+  @override
   String get diagnosticsChannelLabel => 'Log channel';
 
   @override

@@ -413,6 +413,16 @@
   "diagnosticsClearBody": "将删除本机上的日志文件。",
   "diagnosticsCleared": "日志已清空",
   "diagnosticsShareSubject": "dsh remote 诊断日志",
+  "authCauseExpired": "会话已过期",
+  "authCauseRevoked": "凭证已被吊销",
+  "authCauseMaxAge": "已超过 30 天上限",
+  "authCauseUnknown": "原因未知",
+  "consoleCredentialDead": "凭证已失效，不会自动恢复",
+  "consoleCredentialDeadWhy": "{cause} · 需要重新配对才能继续",
+  "@consoleCredentialDeadWhy": {
+    "placeholders": { "cause": { "type": "Object" } }
+  },
+  "consoleGoRepair": "去重新配对",
   "diagnosticsChannelLabel": "日志通道",
   "diagnosticsChannelAll": "全部",
   "diagnosticsChannelApp": "运行",

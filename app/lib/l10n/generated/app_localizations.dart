@@ -2281,6 +2281,48 @@ abstract class L10n {
   /// **'dsh remote diagnostics log'**
   String get diagnosticsShareSubject;
 
+  /// No description provided for @authCauseExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Session expired'**
+  String get authCauseExpired;
+
+  /// No description provided for @authCauseRevoked.
+  ///
+  /// In en, this message translates to:
+  /// **'Credential revoked'**
+  String get authCauseRevoked;
+
+  /// No description provided for @authCauseMaxAge.
+  ///
+  /// In en, this message translates to:
+  /// **'Past the 30-day cap'**
+  String get authCauseMaxAge;
+
+  /// No description provided for @authCauseUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Cause unknown'**
+  String get authCauseUnknown;
+
+  /// No description provided for @consoleCredentialDead.
+  ///
+  /// In en, this message translates to:
+  /// **'Credential expired — it will not recover on its own'**
+  String get consoleCredentialDead;
+
+  /// No description provided for @consoleCredentialDeadWhy.
+  ///
+  /// In en, this message translates to:
+  /// **'{cause} · re-pair to continue'**
+  String consoleCredentialDeadWhy(Object cause);
+
+  /// No description provided for @consoleGoRepair.
+  ///
+  /// In en, this message translates to:
+  /// **'Re-pair now'**
+  String get consoleGoRepair;
+
   /// No description provided for @diagnosticsChannelLabel.
   ///
   /// In en, this message translates to:
