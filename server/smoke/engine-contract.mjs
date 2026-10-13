@@ -31,7 +31,7 @@ const CONTRACT = [
   {
     id: 'pair-lands-on-auth',
     since: 'v3.143',
-    what: '__pair 着陆后跳 /auth?next=/（不是 /），让引擎侧用 token 颁发 cookie',
+    what: '根路径着陆后跳 /auth?next=<着陆URL>（不是裸 /），让引擎侧用 token 颁发 cookie',
   },
   {
     id: 'auth-303-via-wss',
