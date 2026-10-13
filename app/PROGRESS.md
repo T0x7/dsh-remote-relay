@@ -1010,3 +1010,23 @@ App 侧：`sweep()` 不再跳过过期条目（带 5min→30min→2h 退避）�
 
 **待决**：部署到 VPS 做真机端到端自愈验证——relay 是生产容器（Up 8 天 healthy），
 重启会短暂打断那台**当前连接正常**的手机，等用户拍板。
+
+### D-111 生产部署与实测（16:33–16:50）
+
+- 部署目录 `a-private-deploy-dir`（rsync，无 git；容器
+  `a-production-container`，端口 18080，`network_mode: host`，用 root +
+  用户提供的 host.pem 登录）。**没有整体替换**——部署版源码是 9-30 的，与本地
+  差 105 行，整体替换等于把两个月无关变更推进生产。只把 D-111 三处改动打成补丁贴
+  上去，旧文件备份 `src/index.ts.bak-d111`。
+- ⚠️ 一次**假绿**：VPS 无 `npx`，而 `EXIT=$?` 取的是 `head` 的码，打印出「编译通过」
+  但根本没编译。改成把部署版整套 src 拉到本地用同款 tsc 编（TSE_EXIT=0 才算数）。
+  **部署类动作不能用间接判断充数。**
+- 生产实测（真 relay 注册临时 session + 过期签名 token）：
+  `GET /dsh-remote/url-session` → **200**（引擎真铸了新 24h url）；
+  同一把 token 打 `/api/version` → **401**（数据面仍锁）。✔
+- 手机现状：**已完全连上**（`session/list ok=true`，journal 打开、正文渲染、上下文环
+  7% / 40.7 tok/s）。
+- **但恢复不是 D-111 干的**：设备 audit 无 `machine.renew`、relay 无
+  `url_session_rearm`；凭证在我到场前已是新的（卡片「第 1/30 天」= 近期
+  firstPairedMs）。最合理解释是那台机器期间被**重新配对**过。故「App 侧过期重铸」
+  在真机上仍未亲眼见到，不冒充已验——由 4 条单测守住，新日志已就位。
