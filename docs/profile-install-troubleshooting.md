@@ -11,7 +11,7 @@
 | 现象 | 性质 | 判据 |
 |---|---|---|
 | install 报 `ERR_*` 并非 0 退出 | 真失败 | 退出码 |
-| install 退出 0，但重启后行为没变 | **假成功**（本文重点） | 见 §2、§3 |
+| install 退出 0，但重启后行为没变 | **假成功**（本文重点） | 见 §2、§3、§4.1 |
 | 满屏 `missing peer` 警告 + 退出 0 | **正常噪音**，不是失败 | 见 §5 |
 
 ## 1. 坑一：peer 范围没跟上宿主版本 → 插件管理器判「异常」
@@ -139,10 +139,26 @@ tar -xzf dist-local/dsh-remote-relay-plugin-*.tgz -O package/package.json \
 node -e "const p=require(process.env.HOME+'/.dsh/profiles/web/node_modules/dsh-remote-relay-plugin/package.json');
          console.log(p.version, p.peerDependencies)"
 
-# 7. 重启 App 后，跑引擎探针（端到端证据）
+# 7. 这一层被登记了吗（文件在盘上 ≠ 宿主会加载，见 §4.1）
+node -e "const p=require(process.env.HOME+'/.dsh/profiles/web/package.json');
+         console.log((p.dsh?.profile?.bundles ?? []).includes('dsh-remote-relay-plugin'))"
+
+# 8. 重启 App 后，跑引擎探针（端到端证据）
 curl -s http://127.0.0.1:3080/dsh-host/healthz
 curl -s http://127.0.0.1:3080/dsh-remote/session
 ```
+
+### 4.1 第 7 步打印 `false`：装了，但没成为一层
+
+包在 `dependencies` 里只代表 pnpm 把文件放到了盘上。dsh 要把它提升成 profile 的一个
+**层**（宿主真正会加载的东西），还需要包名出现在 `dsh.profile.bundles` 里。
+
+- 走 `dsh plugin add` 时，这一步由 **dsh 自己的插件管理器**对账（它就是执行安装的那一方）；
+- 走 `scripts/install-into-profile.sh` / `scripts/dev-test-profile.sh` 时由脚本自己做——
+  它们直连 pnpm，不经过 dsh 的安装路径。
+
+漏掉它的症状正是最难查的那种：**安装报成功，插件就是不加载**。补法是把包名加进
+`dsh.profile.bundles` 数组，再 `pnpm install`。
 
 ### 探针怎么读
 

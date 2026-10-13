@@ -107,6 +107,13 @@ dsh plugin --profile <your-profile> add \
   dist-local/dsh-remote-relay-plugin-<v>.tgz
 ```
 
+Two repo scripts cover the paths a bare `add` does not: `scripts/dev-test-profile.sh`
+builds a throwaway profile for pre-publish verification, and
+`scripts/install-into-profile.sh` installs into the profile your desktop app
+actually boots (with backup + automatic rollback). Both set the pnpm override and
+the `dsh.profile.bundles` entry for you — [what each path does, and why
+`dsh.profile.bundles` is not optional](plugin/README.md#install).
+
 Then set the same relay URL and PSK in the profile's patch layer — see
 [`plugin/cordis.patch.yml`](plugin/cordis.patch.yml) for the config keys.
 Leave `enabled: false` until the relay is up; a forgotten PSK override fails
@@ -115,7 +122,8 @@ closed at the relay rather than opening a channel.
 Full runbooks: [`server/README.md`](server/README.md) ·
 [`client/README.md`](client/README.md) · wire protocol:
 [`docs/protocol.md`](docs/protocol.md) · plugin shows up as "异常" in the
-host, or a profile install silently does nothing:
+host, or a profile install silently does nothing (most often: the package is in
+`dependencies` but its name is missing from `dsh.profile.bundles`):
 [`docs/profile-install-troubleshooting.md`](docs/profile-install-troubleshooting.md).
 
 ## Repo layout

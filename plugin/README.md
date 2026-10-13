@@ -33,14 +33,52 @@ dsh plugin --profile <your-profile> add \
   dist-local/dsh-remote-relay-plugin-<v>.tgz
 ```
 
-The plugin's tarball resolves the client by name (`workspace:*` is rewritten at
-pack time), and that name is not on npm until the client is published. If pnpm
-still tries the registry, add
-`"pnpm": { "overrides": { "dsh-remote-relay-client": "file:<abs path to the client tgz>" } }`
-to the profile's `package.json` and re-run the same `add`. A tarball install
-needs **no build permission** (unlike a git dependency, whose `prepare` pnpm
-gates behind an explicit allow) — that is exactly why the tarball is the
-recommended form until these packages reach npm.
+The plugin's tarball resolves the client **by name** (`workspace:*` is rewritten
+to a plain version at pack time), and that name is not on npm until the client
+is published. pnpm resolves that transitive edge against the registry **even
+when the same name is already a direct `file:` dependency in the same
+`package.json`** — verified on pnpm 10.28.1: with both tarballs listed it still
+fails with `ERR_PNPM_FETCH_404`. So the override is not a fallback for when pnpm
+misbehaves, it is what keeps the edge off the registry at all:
+
+```json
+"pnpm": { "overrides": { "dsh-remote-relay-client": "file:<abs path to the client tgz>" } }
+```
+
+Both shipped scripts set it for you. A tarball install needs **no build
+permission** (unlike a git dependency, whose `prepare` pnpm gates behind an
+explicit allow) — that is exactly why the tarball is the recommended form until
+these packages reach npm.
+
+### Three ways to install — pick by where it has to run
+
+| path | installs into | use when |
+|---|---|---|
+| `dsh plugin --profile <p> add` | any existing profile | the general, manual path |
+| `scripts/dev-test-profile.sh` | a dedicated profile (`dsh-remote-test`) | pre-publish verification — your existing profiles are production |
+| `scripts/install-into-profile.sh` | the **real** profile (default `web`) | the profile the desktop app actually boots |
+
+Why the third one exists: an app like dsh-host-app's engine launcher runs
+`node bin.js web` and nothing else — it has no way to boot a `dsh-remote-test`
+profile. **A plugin verified only in the test profile is therefore never
+exercised where it has to run.** That script backs up `package.json` +
+`pnpm-lock.yaml` first and restores both (re-running `pnpm install`) if the
+install fails; `cordis.yml`, `cordis.patch.yml` and the existing bundle list
+are left alone.
+
+### Installed is not the same as loaded: `dsh.profile.bundles`
+
+A dependency being in the profile's `dependencies` only means pnpm put the files
+on disk. dsh promotes it to a profile **layer** — something the host actually
+loads — only when its name is in `dsh.profile.bundles`.
+
+- `dsh plugin add` reconciles this itself, because **dsh's own plugin manager
+  is the thing performing the install**.
+- The two scripts above call pnpm directly, so they make the edit themselves.
+
+Skip it and the symptom is the nasty one: the install reports success and the
+plugin simply never loads. If you hit that, see
+[`docs/profile-install-troubleshooting.md`](../docs/profile-install-troubleshooting.md).
 
 ### Configure in the dsh UI (recommended)
 
