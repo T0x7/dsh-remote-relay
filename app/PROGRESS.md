@@ -1030,3 +1030,25 @@ App 侧：`sweep()` 不再跳过过期条目（带 5min→30min→2h 退避）�
   `url_session_rearm`；凭证在我到场前已是新的（卡片「第 1/30 天」= 近期
   firstPairedMs）。最合理解释是那台机器期间被**重新配对**过。故「App 侧过期重铸」
   在真机上仍未亲眼见到，不冒充已验——由 4 条单测守住，新日志已就位。
+
+### D-111 端到端验证：App 真代码 × 生产 relay × 真过期 token
+
+设备时钟改不动（MIUI 禁止 `date`），改走「让 App 的真 `SessionScheduler` + `RelayClient`
+打生产 relay，token 用真的过期 + 正确签名」。
+
+配方（可重建）：
+1. VPS 上 `engine_holder.mjs` 以引擎身份常驻：注册 `SID`，对 relay 代理来的
+   `http.req` 回一个**根路径** `/` 着陆的 24h 签名 url（`/dsh-remote/?` 会被 App 的
+   `parseSignedUrl` 以 `path must be / (root landing)` 拒掉）。
+2. Dart 侧用 `RELAY_PSK` / `RELAY_ORIGIN` / `RELAY_SID` 环境变量跑一次性
+   `flutter test`，构造「24h 前铸、1h TTL」的 `SignedUrlParams`，跑 `sweep()`。
+
+结果（三处同时成立）：
+- `PROBE mintCalls=1 stillExpired=false` —— 过期条目被再问了一次，凭证被原地换掉；
+- `PROBE_LOG action=machine.renew ok=true wasExpired=true` —— App 侧留痕；
+- relay 日志 `url_session_rearm_expired_token_allowed` —— 服务端放行。
+
+途中第一次失败（session 未注册 → mint 空）反而验到了安全边界：伪造 token 打不存在的
+session 会被 `!sessionManager.getSession(sid)` 挡下，口子没有变成万能钥匙。
+
+一次性测试文件已删除（依赖环境变量 + 打生产，留在 test/ 是陷阱），配方记在此处。

@@ -702,3 +702,43 @@ App 侧配套：
 最合理的解释是那台机器在期间**被重新配对过**（day 1/30 就是证据）。所以
 「App 侧过期重铸」这条路径在真机上**仍未亲眼见到**——不冒充已验；它由 4 条单例
 守住，新版日志也已经就位，下次真发生就能直接查到。
+
+### 6.19 D-111 端到端：App 真代码 × 生产 relay × 真过期 token（16:59–18:02）
+
+设备时钟这条路走不通——MIUI 禁止 `date` 改系统时间（`Operation not permitted`），
+改用**直接让 App 的真代码打生产 relay**。
+
+做法：VPS 上起一个 `engine_holder.mjs` 以**引擎身份**常驻（注册一条 session，并对
+relay 代理过来的 `http.req` 回一个真签名的 24h url），Dart 侧拿 `package:dsh_remote_app`
+里**真正的 `SessionScheduler` + `RelayClient`**，配一把「24h 前铸、23h 前就过期、
+HMAC 正确」的 token 跑 `sweep()`。
+
+**两次失败都是好线索**：
+
+1. 第一版 session 没在 relay 注册 → mint 返回空 → `ok=false error=mint returned
+   nothing`。这恰好验到了安全边界：**伪造 token 打不存在的 session 会被
+   `!sessionManager.getSession(sid)` 挡下**，口子没有变成万能钥匙。
+2. 第二版 relay 放行了（200）但 App 报 `SignedUrlFormatException: path must be /
+   (root landing)` —— holder 铸的 url 路径写成 `/dsh-remote/?…`，而 App 要求根路径
+   着陆。是探针的错，不是产品的错。
+
+顺带一提：**这个错误正是因为 D-111 给失败加了日志才看得见**——过去它在
+`_fail()` 里只变成一个自动消失的芯片。
+
+**最终结果**（两端 + App 侧留痕，三处同时成立）：
+
+```
+PROBE     mintCalls=1 stillExpired=false
+PROBE_LOG A/[audit] action=machine.renew machine=sess_prodcheck_002 ok=true wasExpired=true
+relay     {"msg":"url_session_rearm_expired_token_allowed","sid":"sess_prodcheck_002"}
+```
+
+即：过期条目**确实被再问了一次**（`mintCalls=1`、`wasExpired=true`）→ 生产 relay
+**用过期凭证放行了重铸**（`url_session_rearm_expired_token_allowed`）→ 新凭证被解析
+并原地替换（`stillExpired=false`，30 天锚点不动）→ **audit 落了一行**。
+
+一次性测试文件用完即删（依赖 `RELAY_PSK`/`RELAY_ORIGIN` 环境变量、打生产，
+留在 test/ 里是个陷阱）；配方记在 PROGRESS，需要时可照着重建。
+
+**手机那台仍未由这条路径恢复**：它的凭证在我到场前已是新的（卡片「第 1/30 天」），
+设备与 relay 两侧都没有 renew / rearm 记录，最合理解释是期间被重新配对过。
