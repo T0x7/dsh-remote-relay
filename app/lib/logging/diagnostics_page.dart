@@ -24,6 +24,10 @@ class DiagnosticsPage extends StatefulWidget {
 class _DiagnosticsPageState extends State<DiagnosticsPage> {
   late Future<_LogSnapshot> _snapshot;
 
+  /// null = 全部通道。筛到崩溃/操作通道时，行数与体积都只算那个通道——
+  /// 元信息行显示三个文件加起来的大小会让人误判「就这点内容」。
+  LogChannel? _channel;
+
   @override
   void initState() {
     super.initState();
@@ -33,8 +37,13 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
   Future<_LogSnapshot> _load() async {
     final sink = AppLog.sink;
     if (sink == null) return _LogSnapshot.empty;
-    final content = await sink.readAll();
-    final size = await sink.sizeBytes();
+    final channel = _channel;
+    // 复制/分享仍走全量（files()/readAll）：收件人该看到完整现场，
+    // 而不是别人截图时恰好选中的那个通道。
+    final content =
+        channel == null ? await sink.readAll() : await sink.readChannel(channel);
+    final size =
+        channel == null ? await sink.sizeBytes() : await sink.sizeOf(channel);
     final files = await sink.files();
     return _LogSnapshot(content: content, size: size, files: files);
   }
@@ -49,9 +58,13 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
   }
 
   Future<void> _copyAll() async {
-    final snap = await _snapshot;
-    if (!mounted || snap.content.isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: snap.content));
+    // 按钮写的是「复制全部」：即使当前筛在崩溃通道，复制出去的也必须是
+    // 全量现场——收件人没义务先知道该看哪个通道。
+    final sink = AppLog.sink;
+    if (sink == null) return;
+    final content = await sink.readAll();
+    if (!mounted || content.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: content));
     if (!mounted) return;
     _snack(L10n.of(context).diagnosticsCopied);
   }
@@ -138,9 +151,15 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                   const Icon(Icons.article_outlined,
                       size: 56, color: AppTheme.inkDim),
                   const SizedBox(height: AppTheme.m),
-                  Text(l10n.diagnosticsEmpty,
-                      style: const TextStyle(
-                          fontSize: 13, color: AppTheme.inkDim)),
+                  Text(
+                    // 筛到某个通道却空了，是「这个通道确实没有记录」，不是
+                    // 「App 没在跑」——两句话对排障的指向完全不同。
+                    _channel == null
+                        ? l10n.diagnosticsEmpty
+                        : l10n.diagnosticsChannelEmpty,
+                    style: const TextStyle(
+                        fontSize: 13, color: AppTheme.inkDim),
+                  ),
                 ],
               ),
             );
@@ -158,6 +177,30 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                       _humanBytes(data.size), lines.length.toString()),
                   style: const TextStyle(
                       fontSize: 11, color: AppTheme.inkDim),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppTheme.m, AppTheme.s, AppTheme.m, 0),
+                child: SegmentedButton<LogChannel?>(
+                  segments: [
+                    ButtonSegment(
+                        value: null, label: Text(l10n.diagnosticsChannelAll)),
+                    ButtonSegment(
+                        value: LogChannel.app,
+                        label: Text(l10n.diagnosticsChannelApp)),
+                    ButtonSegment(
+                        value: LogChannel.crash,
+                        label: Text(l10n.diagnosticsChannelCrash)),
+                    ButtonSegment(
+                        value: LogChannel.audit,
+                        label: Text(l10n.diagnosticsChannelAudit)),
+                  ],
+                  selected: {_channel},
+                  onSelectionChanged: (selection) => setState(() {
+                    _channel = selection.first;
+                    _snapshot = _load();
+                  }),
                 ),
               ),
               Expanded(

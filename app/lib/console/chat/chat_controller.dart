@@ -8,6 +8,7 @@ import 'package:dsh_remote_core/api/engine_mux.dart';
 import 'package:dsh_remote_core/api/engine_rpc.dart';
 import 'package:dsh_remote_core/api/error_code.dart';
 import 'package:dsh_remote_app/logging/app_log.dart';
+import 'package:dsh_remote_app/logging/frame_sampler.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../services/app_lifecycle_gate.dart';
@@ -571,8 +572,16 @@ class ChatController extends ChangeNotifier {
     // on the team page IS the child's own id, so every subagent conversation
     // came back unauthorized — and D-095 then swallowed the error, leaving a
     // blank page. Callers that open a child must pass the parent's id.
-    _openJournal(sessionId, subagentLabel: subagentLabel,
-        parentSessionId: parentSessionId);
+    // 操作日志：回溯「当时人在干什么」的锚点。只记标识符与计数，不记内容。
+    AppLog.audit('chat.session.open', attrs: {
+      'session': sessionId,
+      'subagent': subagentLabel != null,
+      'readonly': mode != SubagentMode.continuable,
+    });
+    _openJournal(sessionId,
+        subagentLabel: subagentLabel,
+        parentSessionId: parentSessionId,
+        reason: 'open');
   }
 
   /// D-104: 同步打开 journal（[open] 与 [retry] 共用）。
@@ -584,6 +593,7 @@ class ChatController extends ChangeNotifier {
     String sessionId, {
     String? subagentLabel,
     String? parentSessionId,
+    String reason = 'open',
   }) {
     final address = subagentLabel == null
         ? PlainSessionAddress(sessionId)
@@ -595,10 +605,19 @@ class ChatController extends ChangeNotifier {
     final gen = ++_journalGeneration;
     _journal = gateway.follow(address: address);
     AppLog.d('e2e', '[e2e] open journal addr=$address gen=$gen');
+    // 状态迁移进操作日志：`chat.journal.open` 与 `chat.session.open` 分开记，
+    // 因为「重开」才是排障时真正要找的那条（一次会话可能重开好几次）。
+    AppLog.audit('chat.journal.open', attrs: {
+      'session': sessionId,
+      'gen': gen,
+      'reason': reason,
+      'subagent': subagentLabel != null,
+    });
     _journalSub = _journal!.frames.listen((f) {
       // 旧流（关闭动作是异步的）迟到的帧一律丢弃。
       if (_disposed || gen != _journalGeneration) return;
-      AppLog.d('e2e', '[e2e] frame ${f.runtimeType}');
+      // D-107: 聚合计数，不再逐帧落盘（见 [_frames] 的理由）。
+      _frames.record('${f.runtimeType}');
       applyFrame(f);
     });
     _journalErrorSub = _journal!.errors.listen((Object e) {
@@ -727,6 +746,10 @@ class ChatController extends ChangeNotifier {
       content: [PromptContentPart.text(trimmed)],
     );
     AppLog.d('e2e', '[e2e] prompt ok=${result.isOk} err=${result.error}');
+    // 只记长度不记内容：操作日志要能回答「人发了多长的东西」，但不该把
+    // prompt 正文写进第二个文件（prompt 内容已在引擎侧有存档）。
+    AppLog.audit('chat.prompt.send',
+        attrs: {'session': sessionId, 'chars': trimmed.length, 'ok': result.isOk});
     _sending = false;
     if (!result.isOk) {
       final failure = result.error!;
@@ -748,6 +771,11 @@ class ChatController extends ChangeNotifier {
     if (pending == null) return;
     final settled =
         await _settleEvent(eventId: pending.eventId, value: outcome.wire);
+    AppLog.audit('chat.approval.answer', attrs: {
+      'event': pending.eventId,
+      'outcome': outcome.wire,
+      'settled': settled,
+    });
     if (!settled) return;
     await _removeBubble((bubble) => bubble is PendingApproval && bubble.eventId == pending.eventId);
   }
@@ -805,6 +833,8 @@ class ChatController extends ChangeNotifier {
     final pending = pendingQuestion;
     if (pending == null) return;
     final settled = await _settleEvent(eventId: pending.eventId, value: wire);
+    AppLog.audit('chat.question.answer',
+        attrs: {'event': pending.eventId, 'settled': settled});
     if (!settled) return;
     await _removeBubble((bubble) => bubble is PendingQuestion && bubble.eventId == pending.eventId);
   }
@@ -823,6 +853,8 @@ class ChatController extends ChangeNotifier {
       eventId: pending.eventId,
       message: reason,
     );
+    AppLog.audit('chat.question.reject',
+        attrs: {'event': pending.eventId, 'ok': result.isOk});
     if (!result.isOk) {
       AppLog.w('chat', '[D-078] reject for ${pending.eventId} failed (${result.error?.code}); card kept');
       return;
@@ -936,6 +968,15 @@ class ChatController extends ChangeNotifier {
   int _journalGeneration = 0;
   Timer? _autoReopenTimer;
 
+  /// D-107: 帧探针的聚合计数器。原来是**每一帧**打一行
+  /// `[e2e] frame FollowAssistantStream`，引擎流式输出时 130–250 行/秒——
+  /// 512KB 滚动缓冲（≈7800 行）在一次连续输出 30–60 秒内就被冲干净，
+  /// `first-frame deadline hit` 这类现场证据反被挤掉。现在前 3 帧逐帧打、
+  /// 其后每 2 秒汇总一行，30 秒满速输出从约 6000 行降到约 18 行。
+  late final FrameSampler _frames = FrameSampler(
+    emit: (message) => AppLog.d('e2e', '[e2e] $message'),
+  );
+
   /// D-104: 会话页该给用户一个「重试」按钮吗？
   ///
   /// 错误码表已经把重试策略写死了（`RetryPolicy.autoBackoff` 等），这里只是
@@ -967,6 +1008,9 @@ class ChatController extends ChangeNotifier {
     final sessionId = _sessionId;
     if (sessionId == null) return;
     _reopening = true;
+    // 审计要记的是「进来时」的预算状态：手动重试会把下面这行重置成 false，
+    // 记重置后的值就看不出「自动兜底已经用掉了」。
+    final autoBudgetWasSpent = _autoReopenSpent;
     if (manual) _autoReopenSpent = false;
     _autoReopenTimer?.cancel();
     _autoReopenTimer = null;
@@ -984,7 +1028,13 @@ class ChatController extends ChangeNotifier {
     _loading = true;
     _armFirstFrameDeadline(sessionId);
     _subscribeEvents();
-    _openJournal(sessionId);
+    _openJournal(sessionId,
+        reason: manual ? 'retry' : 'auto-reopen');
+    AppLog.audit('chat.journal.reopen', attrs: {
+      'session': sessionId,
+      'manual': manual,
+      'autoBudgetWasSpent': autoBudgetWasSpent,
+    });
 
     _reopening = false;
     notifyListeners();
@@ -1029,6 +1079,12 @@ class ChatController extends ChangeNotifier {
     _bubbles = [..._bubbles, ErrorNotice(_error!)];
     AppLog.w('chat',
         'first-frame deadline hit (${firstFrameTimeout.inSeconds}s) session=$sessionId');
+    // 状态迁移进操作日志：首帧超时是「用户看到空白」的根因，而诊断页默认
+    // 只看 app 通道——回溯时得能从操作日志直接看出这次等待失败了。
+    AppLog.audit('chat.first_frame.timeout', attrs: {
+      'session': sessionId,
+      'afterSeconds': firstFrameTimeout.inSeconds,
+    });
     notifyListeners();
 
     // D-104: 文案写着「正在重试」，那就让它真的重试——否则用户在网络恢复后
@@ -1038,6 +1094,8 @@ class ChatController extends ChangeNotifier {
     if (_error!.retry == RetryPolicy.autoBackoff && !_autoReopenSpent) {
       _autoReopenSpent = true;
       AppLog.i('chat', 'auto-reopening journal once after deadline hit');
+      AppLog.audit('chat.journal.auto_reopen',
+          attrs: {'session': sessionId, 'afterSeconds': _autoReopenBackoff.inSeconds});
       _autoReopenTimer?.cancel();
       _autoReopenTimer = Timer(_autoReopenBackoff, () {
         _autoReopenTimer = null;
@@ -1214,6 +1272,10 @@ class ChatController extends ChangeNotifier {
   }
 
   Future<void> _closeJournal() async {
+    // D-107: 收尾汇总。流式输出中途停下时，尾部那个不满窗口的窗口里
+    // 往往正是最可疑的一段（停了多久、停在哪一类帧上）——不 flush 就永远
+    // 不落盘。
+    _frames.flush(reason: 'journal-close');
     await _journalSub?.cancel();
     await _journalErrorSub?.cancel();
     _journal?.cancel();

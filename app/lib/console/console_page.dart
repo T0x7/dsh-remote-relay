@@ -391,6 +391,13 @@ class _ConsolePageState extends State<ConsolePage> {
     // The engine normalizes the selection; the chip shows what it returned,
     // not what we asked for.
     setState(() => _selection = applied.value! as ModelSelection);
+    // 模型选择进操作日志：「换了模型就不对了」这类回溯里，选了什么、选成功没，
+    // 是最先要确认的两件事。
+    AppLog.audit('console.model.apply', attrs: {
+      'session': sessionId,
+      'provider': choice.provider,
+      'model': choice.model,
+    });
     await chat.refreshProjections();
   }
 

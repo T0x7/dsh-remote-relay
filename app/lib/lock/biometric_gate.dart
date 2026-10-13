@@ -133,6 +133,14 @@ class LocalAuthBiometricGate implements BiometricGate {
 
   @override
   Future<BiometricResult> authenticate({required String reason}) async {
+    final result = await _authenticateOnce(reason);
+    // 解锁进操作日志：「进不去 App」的第一问是「有没有成功解锁过、上一次
+    // 失败码是什么」——失败码已经在 app.log 里，这里记的是动作与结论。
+    AppLog.audit('lock.auth', attrs: {'result': result.runtimeType});
+    return result;
+  }
+
+  Future<BiometricResult> _authenticateOnce(String reason) async {
     try {
       final ok = await _auth.authenticate(
         localizedReason: reason,

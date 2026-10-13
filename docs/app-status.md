@@ -16,13 +16,29 @@
 | 项 | 数值 / 状态 |
 |---|---|
 | 核心包 `dsh_remote_core` | **222/222 测试绿**，`dart analyze` 0 issue（含 9 条**直连真引擎**的契约测试） |
-| Flutter 壳 | **126/126 测试绿**，`flutter analyze` 0 error / 0 warning（含 3 张 Golden） |
+| Flutter 壳 | **484/485 测试绿**，`flutter analyze` 0 error / 0 warning（含 3 张 Golden；唯一红是 `machines list` 的**既有** Golden 漂移，`git stash` 回 HEAD 复跑同样红） |
 | i18n | zh / en **218 键**，键集机器校验一致 |
 | 设备 | Xiaomi Civi（2109119BC / Android 13），调试 APK 213 MB 已安装 |
 | 真引擎 | 本机 `127.0.0.1:3080` 常驻，装有 relay 插件，隧道 `connected` → `https://<relay-host>` |
 | 真机 E2E | 配对（fresh + 跨重启）/ 会话列表 / 建会话 / prompt 往返 / 事件流 / 屏 E·F·K·M·N·L 渲染 **全通过** |
 | 契约抄录 | `docs/engine-contract-m2.md` 856 行，12 项逐字段 + `文件:行号` |
 | 决策记录 | D-001 ~ D-024（见 `app/PROGRESS.md`） |
+
+### 诊断 / 崩溃 / 操作日志（D-107，2026-10-13）
+
+三个独立通道、各自滚动配额（`docs/app-design.md` §7.2 的兑现）：
+
+| 通道 | 文件 | 配额 | release | 内容 |
+|---|---|---|---|---|
+| 诊断 | `app.log` | 256KB | debug 行不落 | 埋点日志 + 帧聚合计数 |
+| 崩溃 | `crash.log` | 64KB | **落** | 框架异常 / 未捕获异常 / async 逃逸（三个全局入口） |
+| 操作 | `audit.log` | 128KB | **落** | 11 类关键动作与状态迁移，只记标识符与计数 |
+
+诊断页按通道切换。**为什么拆**：原来逐帧探针（130–250 行/秒）能在一次连续输出
+30–60 秒内把 512KB 缓冲冲干净，真机上 `first-frame deadline hit` 这类现场证据
+被自己的噪声挤掉；且「全部错误入日志」这条设计承诺此前**没有兑现**——崩溃只进
+logcat 红屏、从不落盘。真机复验（小米 2109119BC）当场抓到两个由此引入的回归，
+均已修，见 `docs/app-field-notes.md` §6.13~6.14。
 
 ### 已交付的屏
 

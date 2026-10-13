@@ -1188,4 +1188,22 @@ class L10nZh extends L10n {
 
   @override
   String get diagnosticsShareSubject => 'dsh remote 诊断日志';
+
+  @override
+  String get diagnosticsChannelLabel => '日志通道';
+
+  @override
+  String get diagnosticsChannelAll => '全部';
+
+  @override
+  String get diagnosticsChannelApp => '运行';
+
+  @override
+  String get diagnosticsChannelCrash => '崩溃';
+
+  @override
+  String get diagnosticsChannelAudit => '操作';
+
+  @override
+  String get diagnosticsChannelEmpty => '该通道暂无日志。';
 }

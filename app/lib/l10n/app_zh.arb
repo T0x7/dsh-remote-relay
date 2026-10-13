@@ -412,5 +412,11 @@
   "diagnosticsClearTitle": "清空日志？",
   "diagnosticsClearBody": "将删除本机上的日志文件。",
   "diagnosticsCleared": "日志已清空",
-  "diagnosticsShareSubject": "dsh remote 诊断日志"
+  "diagnosticsShareSubject": "dsh remote 诊断日志",
+  "diagnosticsChannelLabel": "日志通道",
+  "diagnosticsChannelAll": "全部",
+  "diagnosticsChannelApp": "运行",
+  "diagnosticsChannelCrash": "崩溃",
+  "diagnosticsChannelAudit": "操作",
+  "diagnosticsChannelEmpty": "该通道暂无日志。"
 }

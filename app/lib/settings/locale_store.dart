@@ -71,5 +71,8 @@ class LocaleStore {
   Future<void> setLanguage(L10nCode code) async {
     notifier.value = code;
     await _storage.write(key: _key, value: code.languageCode);
+    // 设置变更进操作日志：「重启后语言丢了」这类问题的第一问就是
+    // 「上次有没有人改过语言、改成了什么」。
+    AppLog.audit('settings.locale.set', attrs: {'lang': code.languageCode});
   }
 }

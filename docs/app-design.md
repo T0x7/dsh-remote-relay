@@ -288,6 +288,8 @@ Tab 机器                       Tab 控制                    Tab 设置
 2. **文案三段式**：发生了什么（一句具体标题）→ 为什么（用户视角一行，错误码等宽）→ 能做什么（恰好一个主行动 / "正在自动重试（第 N 次）"）。zh/en 双资源键；**绝不裸抛 JSON/stack/原始错误串**。
 3. **错误对象模型**：App 内统一 `ErrorCode` 枚举，UI 只认它。映射：HTTP 401→`auth.expired/.revoked/.max_age`（本地三因判别）；429→`ratelimit.hit`；relay `error` 帧→按 code 直映射（`engine_down`/`payload_too_large`/`concurrency_exceeded`）；TLS/超时/DNS→`network.unreachable`（指纹不匹配特判 `tls.cert_changed`）；本地→`pair.qr_invalid`/`renew.failed`/`storage.error`。未枚举引擎错误 → L4 Toast + 原始消息等宽一行，不静默。全部错误入**本地脱敏日志**（token/psk 不落盘）。
 
+   > **兑现方式（D-107）**：日志分三个通道、各自滚动配额——`app.log`（诊断，debug 行只在 debug 构建落）、`crash.log`（崩溃/未捕获异常，**release 也落**）、`audit.log`（操作日志，只记动作与状态迁移，**release 也落**）。通道隔离是防噪声的设计：高频 debug 探针挤不掉崩溃记录。「全部错误入日志」靠 `FlutterError.onError` + `PlatformDispatcher.onError` + `runZonedGuarded` 三个入口兑现——没有全局捕获的话，崩溃只进 logcat 红屏、从不落盘。
+
 ### 7.3 服务端错误契约（relay ↔ App 的语言分工）
 
 **原则：API 出码不出文案，UI 才出文案。** relay 不做通用 i18n——它不知道客户端语言（Accept-Language 可伪造且 App 语言设置在 App 里），一个 401 体也不可能同时伺候浏览器和原生客户端。分工：
@@ -389,6 +391,8 @@ Tab 机器                       Tab 控制                    Tab 设置
 | 机器元数据（名称、relay URL、TOFU 指纹 pin、首次配对时间） | App 私有存储 | 删除机器时 |
 | 会话凭证（Bearer） | Keychain/Keystore（§8） | 删除机器 / 失效页"删除机器" / 吊销后重配对 |
 | 脱敏日志 | App 私有存储，容量上限滚动覆盖 | 随卸载；不随备份出设备 |
+| 崩溃日志（`crash.log`） | App 私有存储，独立配额 | 随卸载；「清除缓存」连带清掉 |
+| 操作日志（`audit.log`） | App 私有存储，独立配额；**只存动作与状态迁移，不存输入内容** | 随卸载；与崩溃日志同上 |
 | 设置（语言/锁/提醒开关） | App 私有存储 | 用户手动 |
 
 **版本与兼容**：隧道协议按帧 `v: 1` 钉死，App 不假设未协商的帧；对 relay 新能力一律**可选探测 + 降级**（§7.3 的 401 `code` 即首个实例——旧 relay 无字段则回本地判别）。App 版本随仓库 tag，"关于"页同时显示 App 版本与协议版本；无 OTA、无自更新（源码即产物，用户重构建即更新）。

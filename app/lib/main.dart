@@ -6,6 +6,7 @@ import 'package:dsh_remote_core/log_hook.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:dsh_remote_core/credentials/session_clock.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'app_root.dart';
@@ -16,6 +17,7 @@ import 'l10n/generated/app_localizations.dart';
 import 'data/machine_entry.dart';
 import 'data/machines_repository.dart';
 import 'logging/app_log.dart';
+import 'logging/crash_capture.dart';
 import 'settings/locale_store.dart';
 import 'machines/machine_detail_page.dart';
 import 'machines/session_expired_page.dart';
@@ -32,10 +34,30 @@ void main() {
   // 脱敏日志。测试不进 main()，sink 保持 null = 仅 debugPrint，零影响。
   AppLog.init(resolveDir: _resolveLogDir);
   CoreLog.sink = AppLog.raw;
-  runApp(DshRemoteApp(
-    // D-062: 打开过的会话的标题要跨进程存活——就差这一处接线。
-    titleCache: SessionTitleCache(storage: SharedPreferencesAsync()),
-  ));
+
+  // 兑现 design §7.2「全部错误入本地脱敏日志」：之前这条承诺没有兑现，
+  // 崩溃只在 logcat 的红屏里、从不进日志文件。见 logging/crash_capture.dart。
+  final crashCapture = CrashCapture()..install();
+  AppLog.audit('app.start', attrs: {
+    'mode': kDebugMode
+        ? 'debug'
+        : kReleaseMode
+            ? 'release'
+            : 'profile',
+  });
+
+  // ⚠️ `WidgetsFlutterBinding.ensureInitialized()` 必须**在这个 zone 之内**。
+  // 写在 runGuarded 之前会在根 zone 建 binding，真机立刻报 `Zone mismatch`
+  // ——而这条 24 条单元测试一条都没抓到，因为测试根本不进 main()。Flutter 对
+  // 此的措辞是「会导致困惑和 bug：任何 zone 相关配置会按难以预测的因素在不同
+  // zone 的配置之间摇摆」。绑定与 runApp 同一个 zone 是唯一正确形态。
+  crashCapture.runGuarded(() {
+    WidgetsFlutterBinding.ensureInitialized();
+    runApp(DshRemoteApp(
+      // D-062: 打开过的会话的标题要跨进程存活——就差这一处接线。
+      titleCache: SessionTitleCache(storage: SharedPreferencesAsync()),
+    ));
+  });
 }
 
 /// 隐私表（design §8 后表）对脱敏日志的两条硬要求在这里兑付：

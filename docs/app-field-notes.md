@@ -1,4 +1,4 @@
-# App 端实测踩坑与修复（D-067 ~ D-106）
+# App 端实测踩坑与修复（D-067 ~ D-107）
 
 > 这份文档记录 **Flutter App 在真机上暴露的问题、根因与修复**。每条都是先
 > 实锤根因、再写红测试、最后真机复验的闭环——多数坑的共同点是「看起来是
@@ -433,3 +433,72 @@ tok/s、缓存两个胶囊，右边留轮数与详情入口。
 - **profile 写锁泄漏**：引擎进程长期持有 `package.json.lock` 的读 fd，导致
   一切 profile 写操作（插件启停）必超时。重启引擎解除。curl 直连可复现，
   与客户端无关。
+### 6.13 诊断日志被自己的探针冲爆，同一次里还发现崩溃从来没被记过（D-107）
+
+**症状**：真机（小米 10-12）打开「诊断日志」，整屏都是
+`D/[e2e] [e2e] frame FollowAssistantStream`，时间戳密集到肉眼分不出行。翻完整份
+文件，真正有用的一行只有一条 `W/[chat] first-frame deadline hit`——而它能活下来
+纯属侥幸：**流已经停了**，没有新噪声把它冲走。
+
+**根因一 · 探针按帧打**：`chat_controller` 对 journal 每一帧打一行 debug 日志。
+引擎流式输出实测 130–250 帧/秒，一行 67 字节，而 `FileLogSink` 上限 256KB ×
+两代 ≈ 7800 行 ⇒ **一次连续输出 30–60 秒就能把两代缓冲全部冲干净**。
+附带两个同源问题：debug 包把同一份噪声同时写 logcat 和文件；逐行
+`writeFromSync` 同步写盘 = 流式输出时每帧一次同步 I/O。
+
+**根因二 · 崩溃从未落盘**：`docs/app-design.md` §7.2 早写着「全部错误入本地
+脱敏日志」，但全仓 `FlutterError.onError` / `runZonedGuarded` /
+`PlatformDispatcher.onError` **零命中**。框架异常只在 logcat 红屏里，未捕获异常
+直接崩进程——**App 真崩了，诊断页是空的**，恰恰是最需要日志的那次。
+
+**修法**：①帧日志改「前 3 帧逐帧 + 每 2 秒按类型汇总」（`FrameSampler`），30 秒
+满速输出 6000 行 → 18 行；②`CrashCapture` 装三个全局入口，且**保留既有
+handler**——捕获 ≠ 吞掉，debug 红屏还得在；③日志拆三通道各自配额
+（`app.log` / `crash.log` / `audit.log`），debug 探针挤不掉崩溃记录；④攒批写，
+满 4KB 或 250ms 落一次盘。
+
+**方法论（今天第三次同族）**：两处断言基准选错，都是回退验证当场逮到的——
+「栈单独成行」拿**记录条数**断言（栈其实是同一条记录里的换行）；「崩溃落 crash
+通道」拿 `MemoryLogSink.lines` 断言（`lines` 不按通道过滤，误投 app 通道照样
+看得见 ⇒ **回退后仍然全绿**）。通道类断言一律走 `readChannel`。
+
+**复验**：`FrameSampler` 回退成逐帧 → `Expected: a value less than <30>,
+Actual: <6000>`；`AppLog.crash` 回退成写 app 通道 → 两条通道守门同时变红。
+app 全量 482/483，唯一红的是既有 golden 漂移（`git stash` 回 HEAD 复跑同样红）。
+
+### 6.14 装上崩溃捕获后的第一个真机启动就报了 Zone mismatch（D-107 续）
+
+**症状**：`CrashCapture` 装好后第一次真机启动，`crash.log` 自己长出来了 1761 字节，
+内容是一条框架错误：
+
+```
+E/[flutter] Zone mismatch.
+The Flutter bindings were initialized in a different zone than is now being used.
+...
+context=while during runApp library=Flutter framework
+#4 main.<anonymous closure> (package:dsh_remote_app/main.dart:53:33)
+#8 runZonedGuarded (dart:async/zone_api.dart:151:12)
+#9 CrashCapture.runGuarded (package:dsh_remote_app/logging/crash_capture.dart:58:5)
+```
+
+**根因**：`WidgetsFlutterBinding.ensureInitialized()` 写在 `main()` 里（根 zone），
+而 `runApp` 在 `runZonedGuarded` 里面（子 zone）。Flutter 对此的措辞是「会导致
+困惑和 bug：任何 zone 相关配置会按难以预测的因素在不同 zone 的配置之间摇摆」。
+
+**为什么 24 条单元测试一条都没抓到**：它们全部**不进 `main()`**。这是本轮第三次
+「测试抓不到、真机一下抓到」——前两次是 D-104 的重试死循环与 D-101 的轨迹不监听。
+**凡是把 `ensureInitialized` / `runApp` / zone 拆开的改动，单元测试的覆盖率是 0。**
+
+**修法**：`ensureInitialized()` 移进 `runGuarded(() { …; runApp(…); })` 内部，
+与 `runApp` 同 zone。修完重启，`crash.log` **根本不存在**（文件按需创建，无崩溃
+就不落盘）——这才是干净启动该有的样子。
+
+**附带发现 · 诊断页打开要 7 秒**：`flush()` 的收敛条件里多写了 `_raf == null`，
+于是「**从没写过**的通道」也被当成「还在忙」，每个空通道空转 200×5ms，三个通道
+= 3 秒起步（小米实测 7 秒多才出内容，旧代码是立刻返回的，纯回归）。而诊断页的
+widget 守门抓不到它——那一页用的是 `MemoryLogSink`，`flush()` 是空实现。
+**守门要覆盖「文件 sink 的真实契约」，不能只测替身。**
+
+**复验**：修完重启 → `crash.log` 不存在、`audit.log` 有 `action=app.start`；
+诊断页 **1 秒内**出内容（原来 7~8 秒）；切到「崩溃」通道显示「该通道暂无日志。」
+而不是含糊的「暂无日志」。app 全量 484/485（唯一红仍是既有 golden 漂移）。

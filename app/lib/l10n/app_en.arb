@@ -412,5 +412,11 @@
   "diagnosticsClearTitle": "Clear the log?",
   "diagnosticsClearBody": "Log files on this device will be deleted.",
   "diagnosticsCleared": "Log cleared",
-  "diagnosticsShareSubject": "dsh remote diagnostics log"
+  "diagnosticsShareSubject": "dsh remote diagnostics log",
+  "diagnosticsChannelLabel": "Log channel",
+  "diagnosticsChannelAll": "All",
+  "diagnosticsChannelApp": "Runtime",
+  "diagnosticsChannelCrash": "Crash",
+  "diagnosticsChannelAudit": "Actions",
+  "diagnosticsChannelEmpty": "No entries in this channel."
 }

@@ -191,9 +191,15 @@ class _PairingFlowSheetState extends State<PairingFlowSheet> {
         AppLog.w('pairing',
             'TOFU pin unavailable for ${origin.host} — stored unpinned');
       }
+      // 主机名按 server 的 redact 纪律留档（identifier，不是 secret）；指纹
+      // 只进 app.log，操作日志里不复制第二份。
+      AppLog.audit('pair.tofu',
+          attrs: {'host': origin.host, 'learned': pin != null});
       return pin;
     } on Object catch (e) {
       AppLog.w('pairing', 'TOFU pin probe failed for ${origin.host}: $e');
+      AppLog.audit('pair.tofu',
+          attrs: {'host': origin.host, 'learned': false, 'error': true});
       return null;
     }
   }

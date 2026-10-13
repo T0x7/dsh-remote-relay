@@ -2280,6 +2280,42 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'dsh remote diagnostics log'**
   String get diagnosticsShareSubject;
+
+  /// No description provided for @diagnosticsChannelLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Log channel'**
+  String get diagnosticsChannelLabel;
+
+  /// No description provided for @diagnosticsChannelAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get diagnosticsChannelAll;
+
+  /// No description provided for @diagnosticsChannelApp.
+  ///
+  /// In en, this message translates to:
+  /// **'Runtime'**
+  String get diagnosticsChannelApp;
+
+  /// No description provided for @diagnosticsChannelCrash.
+  ///
+  /// In en, this message translates to:
+  /// **'Crash'**
+  String get diagnosticsChannelCrash;
+
+  /// No description provided for @diagnosticsChannelAudit.
+  ///
+  /// In en, this message translates to:
+  /// **'Actions'**
+  String get diagnosticsChannelAudit;
+
+  /// No description provided for @diagnosticsChannelEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No entries in this channel.'**
+  String get diagnosticsChannelEmpty;
 }
 
 class _L10nDelegate extends LocalizationsDelegate<L10n> {

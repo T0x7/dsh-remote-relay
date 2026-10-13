@@ -851,3 +851,69 @@
 - **测试**：chat_thinking 新增 durable 回看一条；trajectory_projection 两条
   （有块计数 / 旧消息 null）；全量 382/383（golden 已知漂移 + i18n 守卫当
   场逮到并修正）。
+
+## 2026-10-13 D-107：诊断日志三通道 + 全局崩溃捕获 + 操作日志
+
+**起因**：真机（小米 10-12）那份诊断日志，打开后是一屏
+`[e2e] frame FollowAssistantStream`。不是引擎重发，是探针本身**每帧打一行**。
+
+- **病根一 · 噪声源**：`chat_controller` 对 journal 的每一帧打一行 debug 日志，
+  引擎流式输出时实测 130–250 帧/秒。512KB 滚动缓冲（≈7800 行）在**一次连续
+  输出 30–60 秒内**被冲干净，`W/[chat] first-frame deadline hit` 这类现场证据
+  反被挤掉——唯一的幸存者只是因为那时流已经停了。
+  修法（`FrameSampler`）：前 3 帧逐帧打（保留「帧确实在来」的证据，D-094~D-104
+  靠的就是它），其后按帧类型计数、每 2 秒汇总一行。30 秒满速输出 6000 行 → 18 行。
+  刻意**不用 Timer 驱动窗口收尾**——pending Timer 会吊死 widget 测试；尾部残余
+  由关流时显式 `flush()`。
+- **病根二 · 崩溃从来没进过日志**：design §7.2 早就写着「全部错误入本地脱敏
+  日志」，但全仓零个全局异常钩子。框架异常只在 logcat 红屏里、未捕获异常直接
+  崩进程——App 真崩了打开诊断页是空的。修法（`CrashCapture`）：`FlutterError
+  .onError` + `PlatformDispatcher.onError` + `runZonedGuarded` 三个入口，且
+  **保留既有 handler**（debug 红屏不能因为接了捕获就没了）。
+- **修法 · 三通道各自配额**：`app.log`(256KB, debug 行只在 debug 落) /
+  `crash.log`(64KB, release 也落) / `audit.log`(128KB, release 也落)。通道隔离
+  就是防噪声：debug 探针再吵也挤不掉崩溃记录。诊断页加通道切换，筛到空通道时说
+  「该通道暂无日志」而不是「暂无日志」——两句话对排障的指向完全不同。
+- **批量写**：逐行 `writeFromSync`（`IOSink.flush()` 会关 controller，见原注释）
+  在流式输出时等于每帧一次同步 I/O。改成攒批（4KB / 250ms）。
+  ⚠️ 滚动判定必须**按行铺**而不是整批灌：整批灌的话一个空文件会把整批接下去，
+  256KB 上限当场失效。第一版就踩了这个（rotation 守门用例直接变红）。
+- **操作日志**（用户选定「关键动作与状态迁移」粒度）：会话打开 / journal 重开
+  （含 reason）/ 发送 prompt（只记 chars 不记内容）/ 审批回答 / 问答回答与拒绝 /
+  首帧超时 / 自动重开 / 配对 TOFU / 解锁 / 语言变更 / 选模型，共 11 个动作。
+- **两次断言基准选错，回退验证当场逮到**（今天第 3、第 4 次同族）：
+  ①「栈单独成行」拿**记录条数**当基准——栈是同一条记录里的换行，应断言渲染文本
+  的拆行数；②通道隔离拿 `MemoryLogSink.lines` 当基准——`lines` 不按通道过滤，
+  崩溃误投 app 通道也照样看得见，**回退后仍然全绿**。改用 `readChannel` 才立住。
+- **golden 基线**：`golden · machines list (live + expired)` 红是**既有漂移**——
+  `git stash` 回 HEAD 单独复跑同样红，差异图只有两个小色块，不在本轮改动路径上。
+- **测试**：新增 `frame_sampler_test`（6）+ `crash_capture_test`（8）+ 通道组（8）
+  + 诊断页通道切换（2）；logging 全绿 36；app 全量 482/483（唯一红的就是上述
+  既有 golden 漂移）。
+
+### D-107 真机复验（小米 2109119BC，Android 13，12:12–12:19）
+
+真机当场逮到**两个我自己引入的 bug**，都是 37 条单元测试一条没抓到的：
+
+- **`Zone mismatch`（crash_capture 引入）**：`ensureInitialized()` 在根 zone、
+  `runApp` 在 `runZonedGuarded` 里。第一个真机启动 `crash.log` 自己长出 1761 字节
+  记的就是它——**崩溃捕获第一次上线就抓到了自己**。修法：`ensureInitialized`
+  移进 `runGuarded` 内部。修完干净启动 `crash.log` **根本不存在**（无崩溃不落盘）。
+  ⚠️ 凡是拆 `ensureInitialized` / `runApp` / zone 的改动，单测覆盖率是 0（测试不进 main）。
+- **诊断页打开 7~8 秒（我改 flush 时引入）**：收敛条件多写了 `_raf == null`，
+  「从没写过」的通道被当成「还在忙」，每个空通道空转 200×5ms。纯回归——旧代码
+  立刻返回。诊断页 widget 守门抓不到（那页用 `MemoryLogSink`，flush 是空实现）。
+  修完 1 秒内出内容。
+
+**设备上已实证通过**：①`audit.log` 启动即写 `action=app.start mode=debug`；
+②三通道文件按需创建、互不混写；③诊断页通道切换可用，空通道文案是「该通道暂无日志。」
+（不是「暂无日志。」）；④崩溃捕获真的能抓（它抓到了自己那条 Zone mismatch）；
+⑤修完 12:19 重启，无崩溃 = 无 crash.log。
+
+已补测试后 app 全量 484/485（唯一红仍是既有 golden 漂移）。
+
+**仍待验（需先重新配对）**：真实流式会话下的 `FrameSampler` 汇总行。本机引擎活着
+（`127.0.0.1:3080`，trusted-host `relay.example.com`），但手机上那台机器「已过期」，
+插件的 `/agent-stock/remote` 路由在引擎侧 404，拿不到新的配对链接。该项由单元
+测试按真机速率覆盖（6000 帧 → <30 行）且两次回退即红，但**没有在真机流式输出下
+亲眼见过那一行**，不冒充已验。

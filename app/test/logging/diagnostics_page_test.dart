@@ -35,6 +35,27 @@ void main() {
     }
   }
 
+  /// 三个通道各一行——用来验通道筛选。
+  void seedChannels() {
+    sink().write(LogLine(
+        ts: DateTime(2026, 10, 13, 10),
+        level: LogLevel.info,
+        tag: 'relay',
+        message: 'APP channel line'));
+    sink().write(LogLine(
+        ts: DateTime(2026, 10, 13, 10),
+        level: LogLevel.error,
+        tag: 'flutter',
+        message: 'CRASH channel line',
+        channel: LogChannel.crash));
+    sink().write(LogLine(
+        ts: DateTime(2026, 10, 13, 10),
+        level: LogLevel.audit,
+        tag: 'audit',
+        message: 'AUDIT channel line',
+        channel: LogChannel.audit));
+  }
+
   Future<void> pump(WidgetTester tester) async {
     await tester.pumpWidget(const MaterialApp(
       localizationsDelegates: L10n.localizationsDelegates,
@@ -85,5 +106,47 @@ void main() {
     expect(sink().cleared, isTrue);
     expect(sink().lines, isEmpty);
     expect(find.text('暂无日志。'), findsOneWidget);
+  });
+
+  // D-107：诊断页按通道切换。真机上那份日志的病是「打开只能看到一屏
+  // FollowAssistantStream」——崩溃与操作记录挤不出来，就等于没记。
+  testWidgets('channel filter shows only that channel', (tester) async {
+    seedChannels();
+    await pump(tester);
+
+    // 默认「全部」：三个通道都在。
+    expect(find.textContaining('APP channel line'), findsOneWidget);
+    expect(find.textContaining('CRASH channel line'), findsOneWidget);
+    expect(find.textContaining('AUDIT channel line'), findsOneWidget);
+
+    await tester.tap(find.text('崩溃'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('CRASH channel line'), findsOneWidget);
+    expect(find.textContaining('APP channel line'), findsNothing);
+    expect(find.textContaining('AUDIT channel line'), findsNothing);
+    expect(find.textContaining('共 1 行'), findsOneWidget,
+        reason: '元信息行必须跟着筛选走，不能还报全量');
+
+    await tester.tap(find.text('操作'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('AUDIT channel line'), findsOneWidget);
+    expect(find.textContaining('CRASH channel line'), findsNothing);
+
+    await tester.tap(find.text('全部'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('共 3 行'), findsOneWidget);
+  });
+
+  testWidgets('empty channel says so, not "the app never ran"',
+      (tester) async {
+    seed();
+    await pump(tester);
+
+    await tester.tap(find.text('崩溃'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('该通道暂无日志。'), findsOneWidget);
+    expect(find.text('暂无日志。'), findsNothing,
+        reason: '「这个通道没有记录」和「App 没在跑」是两回事');
   });
 }

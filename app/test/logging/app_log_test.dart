@@ -198,4 +198,181 @@ void main() {
       }, returnsNormally);
     });
   });
+
+  // ── 三通道（D-107）────────────────────────────────────────────
+  //
+  // 真机上那份诊断日志的病根：所有级别挤在 app.log 的一个配额里，逐帧探针
+  // 一次连续输出就把缓冲冲干净。下面每条用例都在锁「通道隔离」这条性质。
+  group('channels', () {
+    late Directory dir;
+
+    setUp(() async {
+      dir = await Directory.systemTemp.createTemp('applog_channels_test');
+    });
+
+    tearDown(() async {
+      if (await dir.exists()) await dir.delete(recursive: true);
+    });
+
+    LogLine line(String message,
+            {LogLevel level = LogLevel.info, LogChannel channel = LogChannel.app}) =>
+        LogLine(
+            ts: DateTime(2026, 10, 13, 12, 30),
+            level: level,
+            tag: 'relay',
+            message: message,
+            channel: channel);
+
+    test('三个通道落到三个文件，互不混写', () async {
+      final sink = FileLogSink(resolveDir: () async => dir);
+      sink.write(line('app channel line'));
+      sink.write(line('crash channel line',
+          level: LogLevel.error, channel: LogChannel.crash));
+      sink.write(line('audit channel line',
+          level: LogLevel.audit, channel: LogChannel.audit));
+      await sink.flush();
+
+      expect(await sink.readChannel(LogChannel.app), contains('app channel line'));
+      expect(await sink.readChannel(LogChannel.crash),
+          contains('crash channel line'));
+      expect(await sink.readChannel(LogChannel.audit),
+          contains('audit channel line'));
+      // 交叉：别的通道的行不能出现在这里
+      expect(await sink.readChannel(LogChannel.app),
+          isNot(contains('crash channel line')));
+      expect(await sink.readChannel(LogChannel.audit),
+          isNot(contains('app channel line')));
+
+      final names =
+          (await sink.files()).map((f) => f.path.split('/').last).toSet();
+      expect(names, containsAll(['app.log', 'crash.log', 'audit.log']));
+    });
+
+    test('app 通道刷屏挤不掉 crash.log —— 真机上正是这个病', () async {
+      // 配额故意给小，让 200 行就把 app.log 滚动十几次。旧实现只有一个文件，
+      // 这里断言的「崩溃记录还在」根本无从成立。
+      final sink = FileLogSink(
+          resolveDir: () async => dir, maxBytes: 256, crashMaxBytes: 4096);
+      sink.write(line('first-frame deadline hit',
+          level: LogLevel.error, channel: LogChannel.crash));
+      await sink.flush();
+
+      for (var i = 0; i < 400; i++) {
+        sink.write(line('flood line $i frame FollowAssistantStream'));
+      }
+      await sink.flush();
+
+      expect(await sink.readChannel(LogChannel.crash),
+          contains('first-frame deadline hit'));
+    });
+
+    test('批量写不丢行：攒批只是把写盘合并，不是把行丢掉', () async {
+      final sink = FileLogSink(
+          resolveDir: () async => dir, maxBytes: 1024 * 1024);
+      for (var i = 1; i <= 100; i++) {
+        sink.write(line('batched line $i'));
+      }
+      // 100 行 ≈ 6KB < batchBytes 4KB? 不，6KB > 4KB 会触发至少一次同步落盘，
+      // 剩下的靠 flush() 逼出来——两条路径都要验。
+      await sink.flush();
+      final all = await sink.readChannel(LogChannel.app);
+      for (var i = 1; i <= 100; i++) {
+        expect(all, contains('batched line $i'),
+            reason: '批量写丢了第 $i 行');
+      }
+    });
+
+    test('sizeOf 报的是单个通道的体积，不是三个加起来', () async {
+      final sink = FileLogSink(resolveDir: () async => dir);
+      sink.write(line('a' * 200, channel: LogChannel.audit));
+      await sink.flush();
+      final auditSize = await sink.sizeOf(LogChannel.audit);
+      expect(auditSize, greaterThan(200));
+      expect(await sink.sizeBytes(), greaterThanOrEqualTo(auditSize));
+    });
+
+    test('readAll 按 app → crash → audit 顺序拼回完整现场', () async {
+      final sink = FileLogSink(resolveDir: () async => dir);
+      sink.write(line('third', channel: LogChannel.audit));
+      sink.write(line('first'));
+      sink.write(line('second', channel: LogChannel.crash));
+      await sink.flush();
+      final all = await sink.readAll();
+      expect(all.indexOf('first'), lessThan(all.indexOf('second')));
+      expect(all.indexOf('second'), lessThan(all.indexOf('third')));
+    });
+
+    test('AppLog.audit → audit 通道，A/[audit] 行首 + null 属性不写', () {
+      final memory = MemoryLogSink();
+      final previous = AppLog.sink;
+      AppLog.sink = memory;
+      addTearDown(() => AppLog.sink = previous);
+
+      AppLog.audit('chat.prompt.send',
+          attrs: {'session': 'sess_abc12', 'chars': 42, 'skip': null});
+
+      expect(memory.lines.single, contains('A/[audit]'));
+      expect(memory.lines.single, contains('action=chat.prompt.send'));
+      expect(memory.lines.single, contains('session=sess_abc12'));
+      expect(memory.lines.single, contains('chars=42'));
+      expect(memory.lines.single, isNot(contains('skip')));
+      // 审计里的 key=value 也过脱敏：调用点放错的东西不会直接落盘。
+      AppLog.audit('x', attrs: {'pairingToken': 'abcd1234-secret'});
+      expect(memory.lines.last, contains('pairingToken=[REDACTED]'));
+    });
+
+    test('AppLog.crash → crash 通道，栈原样附在后面', () async {
+      final memory = MemoryLogSink();
+      final previous = AppLog.sink;
+      AppLog.sink = memory;
+      addTearDown(() => AppLog.sink = previous);
+
+      AppLog.crash('zone', StateError('boom'), StackTrace.current, 'ctx');
+
+      expect(memory.lines.first, startsWith('2026-'));
+      expect(memory.lines.first, contains('E/[zone]'));
+      expect(memory.lines.first, contains('boom'));
+      expect(memory.lines.first, contains('context=ctx'));
+      // 栈以原样换行附在**同一条**记录里——所以断言基准是「渲染后的文本拆行
+      // 数」，不是「有几条记录」。拿记录条数当基准就是 D-102 那种空断言。
+      expect(memory.lines.single.split('\n').length, greaterThan(1),
+          reason: '栈应该单独成行');
+      // 通道必须按 readChannel 验：`lines` 不按通道过滤，写错通道照样看得见
+      // ——用 lines 断言通道就是假绿（回退验证当场逮到）。
+      expect(await memory.readChannel(LogChannel.crash), contains('boom'));
+      expect(await memory.readChannel(LogChannel.app), isEmpty,
+          reason: '崩溃记录不能落到 app 通道');
+    });
+
+    test('flush 在「从未写过」的通道上立刻返回——诊断页不能空转', () async {
+      // 真机回归：`_raf == null` 被算进 busy 时，诊断页每开一个空通道就空转
+      // 200×5ms，三个通道 = 3 秒起步（小米实测 7 秒多才出内容）。
+      // 诊断页 widget 守门抓不到它——那一页用的是 MemoryLogSink，flush 是空实现。
+      final sink = FileLogSink(resolveDir: () async => dir);
+      await expectLater(
+          sink.flush().timeout(const Duration(milliseconds: 300)),
+          completes,
+          reason: '三个通道都没写过时不该等');
+
+      // 再加一个「只有 app 写过、另两个空」的组合，仍必须立刻返回。
+      sink.write(line('app only line'));
+      await expectLater(
+          sink.flush().timeout(const Duration(milliseconds: 300)), completes);
+      expect(await sink.readChannel(LogChannel.app),
+          contains('app only line'));
+    });
+
+    test('MemoryLogSink 的 readChannel 与文件 sink 同语义', () async {
+      final memory = MemoryLogSink();
+      memory.write(line('app only'));
+      memory.write(line('crash only',
+          level: LogLevel.error, channel: LogChannel.crash));
+      expect(await memory.readChannel(LogChannel.app), contains('app only'));
+      expect(await memory.readChannel(LogChannel.crash),
+          contains('crash only'));
+      expect(await memory.readChannel(LogChannel.audit), isEmpty);
+      expect(await memory.sizeOf(LogChannel.crash),
+          greaterThan(0));
+    });
+  });
 }

@@ -1254,4 +1254,22 @@ class L10nEn extends L10n {
 
   @override
   String get diagnosticsShareSubject => 'dsh remote diagnostics log';
+
+  @override
+  String get diagnosticsChannelLabel => 'Log channel';
+
+  @override
+  String get diagnosticsChannelAll => 'All';
+
+  @override
+  String get diagnosticsChannelApp => 'Runtime';
+
+  @override
+  String get diagnosticsChannelCrash => 'Crash';
+
+  @override
+  String get diagnosticsChannelAudit => 'Actions';
+
+  @override
+  String get diagnosticsChannelEmpty => 'No entries in this channel.';
 }
