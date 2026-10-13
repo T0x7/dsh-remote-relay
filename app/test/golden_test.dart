@@ -54,7 +54,7 @@ void main() {
           relay: 'https://relay.example.com',
           now: frozen.subtract(const Duration(hours: 1)),
         )),
-        expiredMachine(),
+        expiredMachine(now: frozen),
       ],
     );
     await tester.pumpWidget(DshRemoteApp(

@@ -42,8 +42,18 @@ MachineEntry machineFrom(Uri url) {
 }
 
 /// An entry whose 24h window closed two days ago (danger card state).
-MachineEntry expiredMachine() => machineFrom(mintTestUrl(
-      now: DateTime.now().subtract(const Duration(days: 3)),
+///
+/// [now] 必须与**渲染时钟**同源。默认取真实 `DateTime.now()`，对 pairing /
+/// screens_dghi 这些用真实时钟渲染的用例是对的；但 golden 套件把渲染时钟冻在
+/// `2026-10-01`，而这里的铸造时间跟着墙钟走——于是 `isExpired(frozen)` 取决于
+/// **你哪天跑测试**：真实日期一过 10-03，这张「过期卡」就自动变成「还剩 236
+/// 小时」的活卡，chip 由「已过期」变成倒计时，Golden 漂移 0.18%。
+///
+/// 这就是上面 [liveMintTime] 注释里那个时间炸弹的**镜像版本**：在线夹具怕的是
+/// 绝对日期过期，过期夹具怕的是相对日期「过期得不够久」。两边都得跟着调用方的
+/// 时钟走，所以这里开 [now] 让 golden 传冻结时间。
+MachineEntry expiredMachine({DateTime? now}) => machineFrom(mintTestUrl(
+      now: (now ?? DateTime.now()).subtract(const Duration(days: 3)),
     ));
 
 /// 把测试设备的系统语言钉成中文。

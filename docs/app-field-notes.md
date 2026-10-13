@@ -1,4 +1,4 @@
-# App 端实测踩坑与修复（D-067 ~ D-107）
+# App 端实测踩坑与修复（D-067 ~ D-108）
 
 > 这份文档记录 **Flutter App 在真机上暴露的问题、根因与修复**。每条都是先
 > 实锤根因、再写红测试、最后真机复验的闭环——多数坑的共同点是「看起来是
@@ -501,4 +501,45 @@ widget 守门抓不到它——那一页用的是 `MemoryLogSink`，`flush()` �
 
 **复验**：修完重启 → `crash.log` 不存在、`audit.log` 有 `action=app.start`；
 诊断页 **1 秒内**出内容（原来 7~8 秒）；切到「崩溃」通道显示「该通道暂无日志。」
-而不是含糊的「暂无日志」。app 全量 484/485（唯一红仍是既有 golden 漂移）。
+而不是含糊的「暂无日志」。app 全量 485/485 全绿（golden 基线的时间炸弹见 §6.15）。
+
+### 6.15 Golden 基线钉住的是「只有那一天存在过」的状态（D-108）
+
+**症状**：全量套件唯一一条红是 `golden · machines list (live + expired)`，0.18%、
+7764px。之前只证伪过「不是我改坏的」（`git stash` 回 HEAD 复跑同样红），没查
+它自己为什么红。
+
+**分诊手法**：别看 `isolatedDiff` 的红块位置就下结论——先跑两次比对 testImage 的
+md5（一致 ⇒ 测试是稳定的，差异来自基线而非抖动），再用 PIL 把 diff bbox、逐行
+逐列的墨迹段、字号框数量全量出来。我最初肉眼把差异读成「文字行多了一个字」，
+**错的**：像素测量显示文字段 (146,501) 两边完全一致，真正变的是过期机器那行的
+第一个 chip（1913→1881，宽 96→128px）。
+
+**根因**：`test/factories.dart` 的 `expiredMachine()` 用**真实墙钟**铸造：
+
+```dart
+MachineEntry expiredMachine() => machineFrom(mintTestUrl(
+      now: DateTime.now().subtract(const Duration(days: 3)),
+    ));
+```
+
+而 golden 套件把渲染时钟**冻结**在 `2026-10-01 09:30 UTC`
+（`MachineCard.nowOverride`）。于是 `isExpired(frozen)` 取决于**你哪天跑测试**：
+铸造时刻 = `realNow − 3d`，签名 URL 窗口 24h ⇒ `expMs = realNow − 2d`。
+
+反推基线：chip 是中性灰、点是绿的 ⇒ 当时**不是过期态**，而是「还剩 0~60 分钟」
+（标签 `"NNm"` 恰好 3 个字形）。解出 `expMs − frozen ∈ [0, 1h)` ⇒ 拍摄时刻在
+**2026-10-03 傍晚**。也就是说这张基线编码的是一个**只在那几个小时存在过的状态**，
+之后任何人都复现不出来——它不是"漂移"，是一次性的。
+
+**讽刺点**：`factories.dart` 里 `liveMintTime` 上方那段注释已经把同一个坑写下来了
+（"a time bomb that made the pairing and golden suites fail on 2026-10-02 with no
+code change"），在线夹具修过，**过期夹具漏改了**——它是那个时间炸弹的**镜像
+版本**：在线夹具怕绝对日期过期，过期夹具怕相对日期「过期得不够久」。
+
+**修法**：①`expiredMachine({DateTime? now})`，默认仍是真实墙钟（pairing /
+screens_dghi 那两套用真实时钟渲染的用例不受影响），golden 传冻结时间；
+②重拍基线——旧基线钉的状态已经不存在，且它本来就不是「过期态」。
+
+**复验**：修完卡片进入真正该有的过期态（红点 + danger chip +「已过期」），
+`flutter test` 全绿；golden 连跑两次 testImage md5 一致，说明可复现。

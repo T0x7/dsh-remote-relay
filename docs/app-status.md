@@ -16,7 +16,7 @@
 | 项 | 数值 / 状态 |
 |---|---|
 | 核心包 `dsh_remote_core` | **222/222 测试绿**，`dart analyze` 0 issue（含 9 条**直连真引擎**的契约测试） |
-| Flutter 壳 | **484/485 测试绿**，`flutter analyze` 0 error / 0 warning（含 3 张 Golden；唯一红是 `machines list` 的**既有** Golden 漂移，`git stash` 回 HEAD 复跑同样红） |
+| Flutter 壳 | **485/485 测试绿**，`flutter analyze` 0 error / 0 warning（含 3 张 Golden） |
 | i18n | zh / en **218 键**，键集机器校验一致 |
 | 设备 | Xiaomi Civi（2109119BC / Android 13），调试 APK 213 MB 已安装 |
 | 真引擎 | 本机 `127.0.0.1:3080` 常驻，装有 relay 插件，隧道 `connected` → `https://<relay-host>` |
