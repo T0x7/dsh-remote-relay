@@ -935,3 +935,31 @@ screens_dghi 不受影响）+ golden 传冻结时间 + 重拍基线。修完卡�
 一次性的；②`liveMintTime` 上方那段注释早就把同一个坑写下来了，在线夹具修过，
 **过期夹具漏改**，它是那个时间炸弹的镜像版本（在线夹具怕绝对日期过期，过期夹具
 怕相对日期「过期得不够久」）。同类仓库排查时先 grep 夹具里的 `DateTime.now()`。
+
+### D-109 冷启动恢复「上次看的会话」+ 补 D-062 标题缓存的 load() 漏接线
+
+起因是用户一句「重新开 app 进控制台是不是不会自动进入上一次的会话」。查证结果
+和预期相反但方向有利：控制台**会**自动打开会话（D-031，取列表第一个 = 引擎侧最近
+更新的），而「上次那个」压根没人记——`grep lastSession|restoreSession|currentSession
+lib/` 零命中。所以落差真实存在，只是原因不是「没自动打开」，而是「自动打开的判据
+不是用户上次看的那个」。
+
+- 新增 `LastSessionStore`（按机器存 `machineId␟sessionId`）。
+- **写**侧只挂 `ChatController.open()`——「此刻在看哪个会话」的唯一漏斗；
+  `open(null)` 视为「用户关掉了」= 忘掉。
+- **读**侧在 `ConsolePage._loadSessions`：先 `await ready`（不等就会静默回落，
+  正是要修的行为），再优先记忆里的会话，**且必须验活**（id 可能已被引擎删了，硬
+  开会得到永远转圈的空白页且不报错）。
+- `main.dart` 补上 `SessionTitleCache.load()`——它此前**只在测试里被调用**，
+  D-062 的「标题跨进程存活」只写不读，冷启动后照旧退回 session-xxxx。
+
+**守门**：`last_session_store_test` 7 条（复用 `workspace_titles_test.dart` 的
+`InMemorySharedPreferencesAsync` 平台替身，不手写 implements）+ `console_
+resume_last_session_test` 5 条（断言落在「实际 follow 了哪个 session id」，而不是
+UI 文案）。**回退即红**：把 `_resumeTarget` 退回 `_latestResumable` →
+`Expected: session-a / Actual: session-b`。
+
+**真机（小米 2109119BC）**：启动无 crash.log，控制台挂载正常、`await ready` 不卡
+不抛，`session/list` 的 401 被如实记录。**但那台机器的会话仍被拒、列表为空，所以
+「恢复到上次那个会话」没有在真机上亲眼验过**——缺一次可用配对，不冒充已验。
+app 全量 497/497。

@@ -16,13 +16,21 @@
 | 项 | 数值 / 状态 |
 |---|---|
 | 核心包 `dsh_remote_core` | **222/222 测试绿**，`dart analyze` 0 issue（含 9 条**直连真引擎**的契约测试） |
-| Flutter 壳 | **485/485 测试绿**，`flutter analyze` 0 error / 0 warning（含 3 张 Golden） |
+| Flutter 壳 | **497/497 测试绿**，`flutter analyze` 0 error / 0 warning（含 3 张 Golden） |
 | i18n | zh / en **218 键**，键集机器校验一致 |
 | 设备 | Xiaomi Civi（2109119BC / Android 13），调试 APK 213 MB 已安装 |
 | 真引擎 | 本机 `127.0.0.1:3080` 常驻，装有 relay 插件，隧道 `connected` → `https://<relay-host>` |
 | 真机 E2E | 配对（fresh + 跨重启）/ 会话列表 / 建会话 / prompt 往返 / 事件流 / 屏 E·F·K·M·N·L 渲染 **全通过** |
 | 契约抄录 | `docs/engine-contract-m2.md` 856 行，12 项逐字段 + `文件:行号` |
 | 决策记录 | D-001 ~ D-024（见 `app/PROGRESS.md`） |
+
+### 冷启动恢复上次会话（D-109，2026-10-13）
+
+控制台冷启动后**优先恢复「你上次看的那个会话」**（跨进程持久化，按机器隔离），
+不存在或已被引擎删除才回落到 D-031 的「引擎侧最近更新」。同进程内前后台切换一直
+是认得的（`_resumeFromBackground` 拿内存里的 `_sessionId` 重开），此前缺的只是
+「杀掉再开」这一条路径。顺带补上 D-062 标题缓存漏掉的 `load()` 接线——它此前只写
+不读。详见 `docs/app-field-notes.md` §6.16。
 
 ### 诊断 / 崩溃 / 操作日志（D-107，2026-10-13）
 

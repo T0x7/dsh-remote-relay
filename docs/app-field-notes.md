@@ -1,4 +1,4 @@
-# App 端实测踩坑与修复（D-067 ~ D-108）
+# App 端实测踩坑与修复（D-067 ~ D-109）
 
 > 这份文档记录 **Flutter App 在真机上暴露的问题、根因与修复**。每条都是先
 > 实锤根因、再写红测试、最后真机复验的闭环——多数坑的共同点是「看起来是
@@ -543,3 +543,41 @@ screens_dghi 那两套用真实时钟渲染的用例不受影响），golden 传
 
 **复验**：修完卡片进入真正该有的过期态（红点 + danger chip +「已过期」），
 `flutter test` 全绿；golden 连跑两次 testImage md5 一致，说明可复现。
+
+### 6.16 冷启动不记得「上次看的会话」，而且标题缓存只写不读（D-109）
+
+**症状**：手机上聊着 A，电脑另一个终端跑了 B，杀进程重开 App，进控制台落到的是 B。
+
+**根因**：跨冷启动**压根没有任何地方存过 sessionId**——`grep -rn "lastSession|
+currentSession|restoreSession" lib/` 零命中，唯一的持久化写入是机器列表、语言设置、
+会话标题缓存。控制台那点「自动打开」取的是 `_latestResumable(rows)` = 列表第一个 =
+**引擎侧最近更新**的会话，跟「用户上次在看哪个」无关。同进程内前后台切换是认得的
+（`_resumeFromBackground` 拿内存里的 `_sessionId` 重开 journal），所以问题只在
+「杀掉再开」这一种路径上。
+
+**顺带挖出的第二个 bug**：`SessionTitleCache.load()` **只在 `test/
+workspace_titles_test.dart` 里被调用过**，生产代码从来没调。于是 D-062「标题跨进程
+存活」只写不读——冷启动后工作区与会话列表照旧退回 `session-xxxx`。**写盘成功 ≠
+读得回来**，而这类漏接线单测抓不到：测试自己调了 `load()`，看起来就通了。
+
+**修法**：
+- 新增 `LastSessionStore`（按机器存 `machineId␟sessionId`，沿用 `SessionTitleCache`
+  的 `␟` 格式），`load()` / `ready` / `remember` / `lastFor`；
+- **写**在 `ChatController.open()`——「用户此刻在看哪个会话」的唯一漏斗（自动打开、
+  列表点选、新建、团队页点子代理都走它）；`open(null)` 走 null 分支 = 忘掉，用户
+  显式关掉的就别在下次又被请回来；
+- **读**在 `ConsolePage._loadSessions`：先 `await ready`（不等就会读到空内存态、
+  **静默**回落到 latest，正是这个特性要修的行为，而且一声不吭），再
+  `_resumeTarget()` 优先记忆里的会话；
+- **必须验活**：记忆里的 id 可能已被引擎删了，硬开会得到一个永远转圈的空白页
+  （D-100 修过的那类症状）且不报错——列表里没有就回落到最近更新的；
+- `main.dart` 里把两个 store 的 `load()` 真正调上（补 D-062 的漏接线）。
+
+**真机复验（小米 2109119BC）**：App 启动无 `crash.log`，控制台挂载正常、
+`await ready` 不卡不抛，`session/list` 的失败被如实记录
+（`EngineRemoteError(auth/refused: … HTTP 401)`）——那台机器的会话仍被拒，会话列表
+为空，所以**没有会话可自动打开**。也就是说：改动路径在真机上跑通了，
+但「恢复到上次那个会话」这一段**没有在真机上亲眼验过**（缺一次可用配对），不冒充
+已验。守门：`last_session_store_test` 7 条 + `console_resume_last_session_test`
+5 条；回退验证把 `_resumeTarget` 退回 `_latestResumable` → `Expected: session-a /
+Actual: session-b` 变红。app 全量 497/497 全绿。

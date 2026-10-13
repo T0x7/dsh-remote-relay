@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'app_root.dart';
+import 'console/workspaces/last_session_store.dart';
 import 'console/workspaces/session_title_cache.dart';
 import 'lock/biometric_gate.dart';
 import 'data/settings_store.dart';
@@ -53,9 +54,17 @@ void main() {
   // zone 的配置之间摇摆」。绑定与 runApp 同一个 zone 是唯一正确形态。
   crashCapture.runGuarded(() {
     WidgetsFlutterBinding.ensureInitialized();
+    // D-062 / D-109：跨进程存的两样东西，**load() 必须在这里调**。
+    // D-062 的 load() 从来没被生产代码调过（只在 test/workspace_titles_test.dart
+    // 里），所以标题只写不读——冷启动后工作区与会话列表照旧退回 session-xxxx。
+    // 写盘成功 ≠ 读得回来，这个坑与「静默的 catch 是查不到根因的直接原因」同源。
+    final titleCache = SessionTitleCache(storage: SharedPreferencesAsync());
+    unawaited(titleCache.load());
+    final lastSession = LastSessionStore(storage: SharedPreferencesAsync());
+    unawaited(lastSession.load());
     runApp(DshRemoteApp(
-      // D-062: 打开过的会话的标题要跨进程存活——就差这一处接线。
-      titleCache: SessionTitleCache(storage: SharedPreferencesAsync()),
+      titleCache: titleCache,
+      lastSession: lastSession,
     ));
   });
 }
@@ -78,6 +87,7 @@ class DshRemoteApp extends StatefulWidget {
     this.localeStore,
     this.biometricGate,
     this.titleCache,
+    this.lastSession,
   });
 
   /// Test seam: injected stores ride AppRoot; null = secure storage.
@@ -97,6 +107,9 @@ class DshRemoteApp extends StatefulWidget {
   /// D-062: 打开过的会话的标题（持久化）。真 App 构造处建一个；
   /// 测试传 inMemory 或 null。
   final SessionTitleCache? titleCache;
+
+  /// D-109：「上次看的会话」记忆，跨冷启动。
+  final LastSessionStore? lastSession;
 
   @override
   State<DshRemoteApp> createState() => _DshRemoteAppState();
@@ -171,6 +184,7 @@ class _DshRemoteAppState extends State<DshRemoteApp> with WidgetsBindingObserver
           localeStore: _localeStore,
           biometricGate: widget.biometricGate,
           titleCache: widget.titleCache,
+          lastSession: widget.lastSession,
         ),
       );
 }

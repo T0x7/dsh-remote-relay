@@ -13,6 +13,7 @@ import 'package:dsh_remote_app/data/machine_entry.dart';
 import 'package:dsh_remote_app/data/machines_repository.dart';
 import 'package:dsh_remote_app/data/pin_store.dart';
 import 'package:dsh_remote_app/l10n/generated/app_localizations.dart';
+import 'package:dsh_remote_app/console/workspaces/last_session_store.dart';
 import 'package:dsh_remote_app/console/workspaces/session_title_cache.dart';
 import 'package:dsh_remote_app/logging/app_log.dart';
 import 'package:dsh_remote_app/console/agent_preset_sheet.dart';
@@ -44,6 +45,7 @@ class ConsolePage extends StatefulWidget {
     required this.store,
     this.gatewayFactory,
     this.titleCache,
+    this.lastSession,
   });
 
   final MachinesStore store;
@@ -54,6 +56,9 @@ class ConsolePage extends StatefulWidget {
   /// D-062: 标题缓存。null = inMemory（测试与不需要持久化的调用方）；
   /// 真 App 在 app_root.dart 接线处传持久化版本。
   final SessionTitleCache? titleCache;
+
+  /// D-109：「上次看的会话」记忆。null = inMemory（测试与不需要持久化的调用方）。
+  final LastSessionStore? lastSession;
 
   @override
   State<ConsolePage> createState() => _ConsolePageState();
@@ -67,6 +72,9 @@ class _ConsolePageState extends State<ConsolePage> {
   /// D-062: 兜底的标题缓存。App 真身从 app_root.dart 传持久化版本进来；
   /// 这里只服务「没传 titleCache 又真的跑在真机上」的路径。
   late final SessionTitleCache _titleCache = SessionTitleCache.inMemory();
+
+  /// D-109：同上，兜底的会话记忆。
+  late final LastSessionStore _lastSession = LastSessionStore.inMemory();
   MachineEntry? _machine;
   Object? _ownedResources;
   int _segment = 0;
@@ -194,6 +202,7 @@ class _ConsolePageState extends State<ConsolePage> {
     final chat = ChatController(
       gateway: gateway,
       machineId: _machine?.id,
+      lastSession: widget.lastSession ?? _lastSession,
     )..startEvents();
     _chat?.dispose();
     _chat = chat;
@@ -235,12 +244,31 @@ class _ConsolePageState extends State<ConsolePage> {
 
     final chat = _chat;
     if (!autoOpen || chat == null || chat.sessionId != null) return;
-    final latest = rows.isEmpty ? null : _latestResumable(rows);
-    if (latest != null) {
-      await chat.open(latest.sessionId);
+    // D-109：**必须先 await 读盘**，否则拿到空内存态、静默回落到 latest——
+    // 那正是这个特性要修的行为，而且一声不吭。
+    await (widget.lastSession ?? _lastSession).ready;
+    final target = _resumeTarget(rows);
+    if (target != null) {
+      await chat.open(target.sessionId);
       await chat.refreshProjections();
       if (mounted) setState(() {});
     }
+  }
+
+  /// D-109：冷启动该开哪个。
+  ///
+  /// 优先「上次看的那个」——但**必须验活**：它可能已经被引擎删了，拿一个不存在的
+  /// id 去 `session/follow`，用户看到的是一个永远转圈的空白页（正是 D-100 修过的
+  /// 那类症状），而且不会有任何报错。列表里没有就回落到最近更新的那个。
+  SessionSummary? _resumeTarget(List<SessionSummary> rows) {
+    if (rows.isEmpty) return null;
+    final remembered = (widget.lastSession ?? _lastSession).lastFor(_machine?.id);
+    if (remembered != null) {
+      for (final row in rows) {
+        if (row.sessionId == remembered) return row;
+      }
+    }
+    return _latestResumable(rows);
   }
 
   /// The most recently updated session row (the list arrives sorted that way),

@@ -15,6 +15,7 @@ import '../../services/app_lifecycle_gate.dart';
 import '../../services/job_completion_watcher.dart';
 import '../../services/reminder_router.dart';
 import '../trajectory/trajectory_ledger.dart';
+import '../workspaces/last_session_store.dart';
 import '../workspaces/session_title_cache.dart';
 
 /// One rendered turn in the conversation flow (mockup 屏 E).
@@ -310,6 +311,7 @@ class ChatController extends ChangeNotifier {
     AppLifecycleGate? lifecycle,
     ReminderRouter? reminders,
     this.titles,
+    this.lastSession,
   })  : _lifecycle = lifecycle ?? AppLifecycleGate.instance,
         _reminders = reminders ?? ReminderRouter.instance {
     _lifecycle.addListener(_onLifecycle);
@@ -321,6 +323,13 @@ class ChatController extends ChangeNotifier {
   /// D-059: 打开过的会话的标题会记在这里，好让工作区列表能显示它而不是 id。
   /// null = 不记（默认），测试与不需要的调用方不必提供。
   final SessionTitleCache? titles;
+
+  /// D-109：冷启动恢复「上次看的会话」。null = 不记（测试与不知道该特性的调用方）。
+  ///
+  /// 只在 [open] 里写——那是「用户此刻在看哪个会话」的唯一漏斗（自动打开、列表
+  /// 点选、新建、团队页点子代理都走它）。读在 `ConsolePage._loadSessions`，并且
+  /// 必须先 await [LastSessionStore.ready]。
+  final LastSessionStore? lastSession;
 
   /// D-032: how often the `$events` stream is re-opened to defeat the relay's
   /// deaf long-lived carrier. Injectable for tests; `Duration.zero` disables
@@ -550,6 +559,8 @@ class ChatController extends ChangeNotifier {
     _sessionPreset = null;
     if (sessionId == null) {
       _headerTitle = null;
+      // D-109：显式关掉会话 = 忘掉这台机器的记忆，否则下次冷启动又把它请回来。
+      unawaited(lastSession?.remember(machineId, null) ?? Future<void>.value());
       notifyListeners();
       return;
     }
@@ -578,6 +589,10 @@ class ChatController extends ChangeNotifier {
       'subagent': subagentLabel != null,
       'readonly': mode != SubagentMode.continuable,
     });
+    // D-109：漏斗处记「这台机器现在看的是这个会话」。`open(null)` 走 remember
+    // 的 null 分支 = 忘掉，用户显式关掉的就别在下次冷启动又被请回来。
+    // 子代理会话也记：用户点进子代理看的就是它，冷启动回到子会话是合理的。
+    unawaited(lastSession?.remember(machineId, sessionId) ?? Future<void>.value());
     _openJournal(sessionId,
         subagentLabel: subagentLabel,
         parentSessionId: parentSessionId,

@@ -7,6 +7,7 @@ import 'data/settings_store.dart';
 import 'l10n/generated/app_localizations.dart';
 import 'lock/biometric_gate.dart';
 import 'lock/lock_screen.dart';
+import 'console/workspaces/last_session_store.dart';
 import 'console/workspaces/session_title_cache.dart';
 import 'main.dart';
 import 'package:dsh_remote_core/api/engine_gateway.dart';
@@ -26,6 +27,7 @@ class AppRoot extends StatefulWidget {
     this.localeStore,
     this.biometricGate,
     this.titleCache,
+    this.lastSession,
   });
 
   final MachinesStore? store;
@@ -41,6 +43,9 @@ class AppRoot extends StatefulWidget {
   /// D-062: 打开过的会话的标题（持久化）。真 App 构造时传入；
   /// 测试传 inMemory 或 null。
   final SessionTitleCache? titleCache;
+
+  /// D-109：「上次看的会话」记忆。
+  final LastSessionStore? lastSession;
 
   /// Injected console transport; null builds a real client per machine.
   /// Widget tests pass a fake so the console renders without a relay.
@@ -103,6 +108,7 @@ class _AppRootState extends State<AppRoot> {
               store: _store,
               gatewayFactory: widget.gatewayFactory,
               titleCache: widget.titleCache,
+              lastSession: widget.lastSession,
             )
           : const _ConsoleDeferred(),
       SettingsPage(
