@@ -1,5 +1,7 @@
 # dsh-remote-relay
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Reach a local dsh engine from anywhere — without exposing it to the public
 internet.
 
@@ -121,9 +123,9 @@ closed at the relay rather than opening a channel.
 
 Full runbooks: [`server/README.md`](server/README.md) ·
 [`client/README.md`](client/README.md) · wire protocol:
-[`docs/protocol.md`](docs/protocol.md) · plugin shows up as "异常" in the
-host, or a profile install silently does nothing (most often: the package is in
-`dependencies` but its name is missing from `dsh.profile.bundles`):
+[`docs/protocol.md`](docs/protocol.md) · plugin shows up as "异常" ("abnormal")
+in the host, or a profile install silently does nothing (most often: the package
+is in `dependencies` but its name is missing from `dsh.profile.bundles`):
 [`docs/profile-install-troubleshooting.md`](docs/profile-install-troubleshooting.md).
 
 ## Repo layout
@@ -158,15 +160,25 @@ the authoritative frame reference).
 
 ## Documentation
 
+Documents marked 中文 are written in Chinese; everything else is English. They
+are marked here so nobody follows a link expecting English prose and lands in a
+wall of Chinese — the underlying docs are unchanged, only their language is
+declared.
+
 - [`docs/protocol.md`](docs/protocol.md) — tunnel wire protocol (authoritative frame reference)
-- [`docs/engine-rpc-errata.md`](docs/engine-rpc-errata.md) — **engine `/api` RPC 勘误表**：
-  实测正确的信封形状与易错点（写引擎客户端前必读）
-- [`docs/app-field-notes.md`](docs/app-field-notes.md) — Flutter app 真机踩坑与修复纪实
-- [`docs/device-testing.md`](docs/device-testing.md) — **真机测试方案**：三层体系 +
-  adb 控制真机手册 + 环境陷阱速查（跑回归前读）
-- [`docs/engine-contract-m2.md`](docs/engine-contract-m2.md) — 引擎契约字段级引用
+- [`docs/engine-rpc-errata.md`](docs/engine-rpc-errata.md) — **engine `/api` RPC errata table**:
+  the envelope shapes that are actually correct, plus the easy-to-hit mistakes
+  (read before writing an engine client) · **中文**
+- [`docs/app-field-notes.md`](docs/app-field-notes.md) — Flutter app findings from
+  real-device testing, and the fixes that came out of them · **中文**
+- [`docs/device-testing.md`](docs/device-testing.md) — **device testing plan**: the
+  three-layer system + an adb handbook for driving a real device + an
+  environment-trap quick reference (read before a regression run) · **中文**
+- [`docs/engine-contract-m2.md`](docs/engine-contract-m2.md) — field-level reference for
+  the engine contract · **中文**
 - [`docs/deploy.md`](docs/deploy.md) — VPS deployment
-- [`app/README.md`](app/README.md) · [`app/TESTING.md`](app/TESTING.md) — app 开发与验收
+- [`app/README.md`](app/README.md) · [`app/TESTING.md`](app/TESTING.md) — app development
+  and acceptance · **中文**
 
 > Working on the engine-facing client? Read the errata table **first** — most
 > integration bugs in this project traced back to a hand-copied contract that
