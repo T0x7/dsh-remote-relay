@@ -1,8 +1,46 @@
 import { defineConfig } from 'vitest/config'
+import { createRequire } from 'node:module'
+import path from 'node:path'
 
 /** Stand-in for the plugin's React surfaces, aliased for the non-rendering specs. */
 const STUB = new URL('./tests/stubs/card.ts', import.meta.url).pathname
 const MODEL = new URL('./src/client/', import.meta.url).pathname
+
+/**
+ * The REAL primitives build for the render spec.
+ *
+ * form-render.spec.tsx renders RelayConfigForm against the published
+ * SettingsFormModel instead of a hand-written double. The npm tarball of
+ * @deepseek-ai/dsh-client-ui-primitives declares every library it bundles as
+ * a peerDependency, so importing it from a plugin checkout would drag in a
+ * dozen unrelated devDeps. The engine vendor ships the same version (rc.2)
+ * with its dependency tree resolved, so the alias points there; a checkout on
+ * a machine without the vendor tree skips the render spec instead of failing.
+ */
+const require_ = createRequire(import.meta.url)
+let PRIMITIVES_LIB: string | undefined
+try {
+  PRIMITIVES_LIB = require_.resolve('@deepseek-ai/dsh-client-ui-primitives/package.json')
+} catch {
+  PRIMITIVES_LIB = undefined
+}
+const VENDOR_TREE = '/Users/someone/Container/agent-stock/apps/agent-stock-desktop/dist/mac-arm64/AgentStock.app/Contents/Resources/engine/vendor/deepseek-harness'
+const VENDOR_PRIMITIVES = VENDOR_TREE + '/packages/client/ui-primitives'
+// The vendor build resolves react against ITS OWN node_modules; the spec's
+// react-dom resolves against the plugin's. Two React copies = "invalid hook
+// call". Aliasing react and react/jsx-runtime onto the vendor copy keeps one
+// instance across the whole render.
+const VENDOR_REACT_CANDIDATE = VENDOR_TREE + '/node_modules/.pnpm/react@18.3.1/node_modules/react'
+const VENDOR_REACT_DOM_CANDIDATE = VENDOR_TREE + '/node_modules/.pnpm/react-dom@18.3.1_react@18.3.1/node_modules/react-dom'
+const VENDOR_REACT_LIB = (() => {
+  try { require_.resolve(VENDOR_REACT_CANDIDATE + '/package.json'); return VENDOR_REACT_CANDIDATE } catch { return undefined }
+})()
+const VENDOR_REACT_DOM_LIB = (() => {
+  try { require_.resolve(VENDOR_REACT_DOM_CANDIDATE + '/package.json'); return VENDOR_REACT_DOM_CANDIDATE } catch { return undefined }
+})()
+const hasVendorPrimitives = (() => {
+  try { return require_.resolve(VENDOR_PRIMITIVES + '/package.json') !== undefined } catch { return false }
+})()
 
 /**
  * Standalone test config for the dsh remote plugin.
@@ -25,10 +63,25 @@ export default defineConfig({
     // e2e specs run here too: each one declares its own requirements (a built
     // artifact, an installed dsh) and skips with a message when unmet, so
     // `pnpm test` is green in a bare checkout and exhaustive in CI.
-    include: ['tests/**/*.spec.ts', 'tests/**/*.e2e.ts'],
+    include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx', 'tests/**/*.e2e.ts'],
   },
   resolve: {
     alias: [
+      // The render spec needs the REAL primitives. Prefer the local install
+      // when its peer tree is satisfied; otherwise the engine vendor ships the
+      // same rc.2 build with a resolved tree. form-render.spec.tsx skips
+      // itself when neither exists.
+      ...(hasVendorPrimitives && VENDOR_REACT_LIB && VENDOR_REACT_DOM_LIB
+        ? [
+            { find: /^react$/, replacement: path.join(VENDOR_REACT_LIB!, 'index.js') },
+            { find: /^react\/jsx-runtime$/, replacement: path.join(VENDOR_REACT_LIB!, 'jsx-runtime.js') },
+            { find: /^react-dom$/, replacement: path.join(VENDOR_REACT_DOM_LIB!, 'index.js') },
+            { find: /^react-dom\/client$/, replacement: path.join(VENDOR_REACT_DOM_LIB!, 'client.js') },
+          ]
+        : []),
+      ...(hasVendorPrimitives
+        ? [{ find: /^@deepseek-ai\/dsh-client-ui-primitives$/, replacement: VENDOR_PRIMITIVES }]
+        : []),
       // The card and the form view are JSX modules the client half references
       // for its registrations. The gating and watchdog specs exercise the
       // half's pure DOM logic and never render either component, so they are
@@ -39,6 +92,9 @@ export default defineConfig({
       // which is how a render condition on a prop nobody passed shipped
       // silently. That seam is pinned textually instead, by
       // tests/card-config-entry.spec.ts (no deps, runs in a bare checkout).
+      // form-render.spec.tsx is the render-level half of that seam: the two
+      // aliases above must NOT catch the spec's own direct import, which is
+      // absolute and therefore unmatched by the relative patterns below.
       { find: /^\.\/RemoteSettingsCard\.tsx$/, replacement: STUB },
       { find: /^\.\/RelayConfigForm\.tsx$/, replacement: STUB },
     ],

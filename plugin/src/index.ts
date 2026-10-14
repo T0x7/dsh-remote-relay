@@ -50,6 +50,48 @@ export const inject = ['webServer']
 export const ROUTE_PREFIX = '/dsh-remote'
 
 /**
+ * Routes only the dsh host may call — minting a pairing, revoking EVERY
+ * pairing, and switching the tunnel by hand.
+ *
+ * WHY (v3.282): the relay forwards a paired device's request verbatim to this
+ * engine's loopback listener, so from here every bridged request looks local.
+ * Before this classification existed the code assumed "loopback-only by
+ * deployment" — an assumption three hops away proved false: the relay mounts
+ * `/dsh-remote/*` on its own public route table, and the tunnel hands over the
+ * device's method, path and body untouched. A phone could therefore revoke the
+ * pairings it is itself using, or cut the tunnel. Each is self-inflicted denial
+ * of service, and the engine has no way to refuse by origin — the request
+ * arrives from 127.0.0.1.
+ *
+ * The read-only half of this prefix stays reachable on purpose: the paired app
+ * polls `GET /session` for status (app/lib/services/machines_session_poller.dart)
+ * and renews its credential through `GET /url-session`
+ * (app/lib/services/session_scheduler.dart).
+ *
+ * Enforcement is layered. The relay refuses the same three (method, path) pairs
+ * before routing — see LOCAL_ADMIN_DENY in server/src/index.ts — AND this
+ * handler refuses any request carrying the tunnel's provenance header, so a
+ * misconfigured relay cannot widen the boundary either. Keep both lists in step.
+ */
+const LOCAL_ADMIN_ROUTES: ReadonlySet<string> = new Set([
+  'POST session',
+  'DELETE session',
+  'POST tunnel',
+])
+
+/** Header the tunnel stamps on requests it forwarded from a paired device. */
+const REMOTE_TUNNEL_MARKER_HEADER = 'x-dsh-remote-tunnel'
+
+/**
+ * Whether this request came in over the relay tunnel rather than from a browser
+ * sitting on this machine. Node lowercases incoming header names.
+ */
+function cameThroughTunnel(req: IncomingMessage): boolean {
+  const raw = req.headers[REMOTE_TUNNEL_MARKER_HEADER]
+  return raw !== undefined && raw !== ''
+}
+
+/**
  * Shared-secret fallback. Mirrors the relay's documented insecure default
  * so a misconfigured pair fails *closed* at the relay rather than opening
  * a half-configured channel. Production must override both sides.
@@ -197,6 +239,18 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, client: Remot
   const method = (req.method ?? 'GET').toUpperCase()
   const leaf = (req.url ?? '').split('?')[0]!.split('/').filter(Boolean)[1]
 
+  // v3.282 engine-admin boundary. The relay refuses these same (method, leaf)
+  // pairs before it routes; refusing again here is what makes the boundary
+  // hold when the relay in front of this engine is misconfigured, replaced, or
+  // simply an older build that predates the rule.
+  if (cameThroughTunnel(req) && LOCAL_ADMIN_ROUTES.has(`${method} ${leaf}`)) {
+    sendJson(res, 403, {
+      error: 'engine admin route is not reachable from a paired device',
+      hint: 'pairing, revocation and tunnel control live on the dsh host only',
+    })
+    return
+  }
+
   if (leaf === 'session' && method === 'POST') {
     // Single-mode pairing: every pairing grants full control. The
     // configuration plane is kept off the remote channel by dsh's host
@@ -245,7 +299,9 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, client: Remot
     // Signed session link (multi-device browser entry, root path /?).
     // mintUrlSession returns a 24h signed bearer the SPA lifts from
     // location.search; the gate verifies it without minting a cookie.
-    // Loopback-only by deployment (this route is behind the local engine).
+    // Reachable from a paired device BY DESIGN — it is how the phone renews
+    // its credential (app/lib/services/session_scheduler.dart). It mints a
+    // link, it does not change this engine's configuration.
     try {
       const url = client.mintUrlSession()
       sendJson(res, 200, { url })
@@ -255,8 +311,8 @@ async function dispatch(req: IncomingMessage, res: ServerResponse, client: Remot
     return
   }
   if (leaf === 'tunnel' && method === 'POST') {
-    // Manual tunnel switch ("disconnect relay / reconnect"). Loopback
-    // only by deployment: a relayed request cannot reach this route.
+    // Manual tunnel switch ("disconnect relay / reconnect"). Local-admin:
+    // refused for tunnel-borne requests above, and by the relay in front.
     let action = ''
     try {
       const body = (await readJsonBody(req)) as { action?: unknown }

@@ -23,6 +23,7 @@ import {
   SettingsValueField,
   type SettingsSecretSpec,
 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useMemo, useSyncExternalStore } from 'react'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   ENTRY_ID,
@@ -73,17 +74,63 @@ const FORM_LABELS = {
 /**
  * The relay connection form: one control per Config field plus the two
  * write-only secret fields. Nothing reaches the Host until Save.
+ *
+ * v3.282 — SUBSCRIBE, do not poll-read. This component used to call
+ * `model.shell()` / `model.field()` straight from render without binding to
+ * the model, so a keystroke changed the model but nothing re-rendered: React
+ * reset the controlled input to its last-rendered text, the typed character
+ * vanished, and it only reappeared when the parent's one-second tick happened
+ * to repaint the subtree. The primitives' snapshot store flushes synchronously
+ * for exactly this reason ("controlled inputs need same-tick echo"); `bind()`
+ * is the documented way onto that flush, and the official cards all go through
+ * it (see ui-settings-shell/shell-card-controller.ts).
+ *
+ * `useSyncExternalStore` subscribes this component to that projection, so the
+ * echo is same-tick, the save button's disabled state tracks the drafts
+ * instead of the last repaint, and the parent's per-second tick is no longer
+ * the thing keeping the form alive.
+ *
  * @param props - the staging model, and this entry's secret slots as the Host
  * reports them (existence only — the values never leave the Host).
  * @returns the form frame.
  */
+/** One immutable projection of the form — what the controls render from. */
+interface RelayFormProjection {
+  shell: ReturnType<SettingsFormModel<RelayConfigValues>['shell']>
+  fields: {
+    enabled: ReturnType<SettingsFormModel<RelayConfigValues>['field']>
+    relay_url: ReturnType<SettingsFormModel<RelayConfigValues>['field']>
+    upstream_host: ReturnType<SettingsFormModel<RelayConfigValues>['field']>
+    upstream_port: ReturnType<SettingsFormModel<RelayConfigValues>['field']>
+  }
+}
+
 export function RelayConfigForm(props: {
   model: SettingsFormModel<RelayConfigValues>
   secrets: readonly SecretSlot[] | undefined
 }) {
   const { model, secrets } = props
+
+  // Built once per model: bind() registers a listener for the lifetime of the
+  // store, so it must not re-run per render.
+  const store = useMemo(
+    () => model.bind(() => ({
+      shell: model.shell(),
+      fields: {
+        enabled: model.field('enabled'),
+        relay_url: model.field('relay_url'),
+        upstream_host: model.field('upstream_host'),
+        upstream_port: model.field('upstream_port'),
+      },
+    })),
+    [model],
+  )
+  const state = useSyncExternalStore<RelayFormProjection>(
+    store.subscribe as (onStoreChange: () => void) => () => void,
+    () => store.getSnapshot() as RelayFormProjection,
+  )
   const actions = model.actions()
-  const shell = model.shell()
+  const { shell } = state
   const disabled = !shell.writable
   const pskConfigured = secretConfigured(secrets, 'psk')
   const engineTokenConfigured = secretConfigured(secrets, 'engine_token')
@@ -98,7 +145,7 @@ export function RelayConfigForm(props: {
         resetLabel="恢复默认"
         invalidLabel="只接受 true 或 false"
         disabled={disabled}
-        {...model.field('enabled')}
+        {...state.fields.enabled}
         onEdit={(text) => { actions.edit('enabled', text) }}
         onReset={() => { actions.resetField('enabled') }}
       />
@@ -111,7 +158,7 @@ export function RelayConfigForm(props: {
         resetLabel="恢复默认"
         invalidLabel="取值不合法"
         disabled={disabled}
-        {...model.field('relay_url')}
+        {...state.fields.relay_url}
         onEdit={(text) => { actions.edit('relay_url', text) }}
         onReset={() => { actions.resetField('relay_url') }}
       />
@@ -134,7 +181,7 @@ export function RelayConfigForm(props: {
         resetLabel="恢复默认"
         invalidLabel="取值不合法"
         disabled={disabled}
-        {...model.field('upstream_host')}
+        {...state.fields.upstream_host}
         onEdit={(text) => { actions.edit('upstream_host', text) }}
         onReset={() => { actions.resetField('upstream_host') }}
       />
@@ -147,7 +194,7 @@ export function RelayConfigForm(props: {
         resetLabel="恢复默认"
         invalidLabel="请输入 1–65535 的整数"
         disabled={disabled}
-        {...model.field('upstream_port')}
+        {...state.fields.upstream_port}
         onEdit={(text) => { actions.edit('upstream_port', text) }}
         onReset={() => { actions.resetField('upstream_port') }}
       />
