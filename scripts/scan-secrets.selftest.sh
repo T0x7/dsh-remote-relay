@@ -130,9 +130,17 @@ echo "6. a /root/ deployment path must be caught"
 # deploy directory under /root, in a progress log and a field-notes table)
 # through a release while rule 5 matched only /Users and /home. The macOS and
 # Linux-desktop spellings were covered; the one a VPS uses was not.
+#
+# The planted value is deliberately NOT the real one, and it has to stay that
+# way. A history rewrite that scrubbed the real deploy path out of the repo
+# also rewrote it inside this file — and with the planted leak gone, this case
+# and the one below began failing for the right reason at the wrong cost: the
+# guard could no longer prove it still catches anything. Any bulk replacement
+# over this repo must leave the fixtures alone; they are the only evidence the
+# rules do anything at all.
 printf '%s\n' \
   '# TEMPORARY scanner self-test fixture — must never be committed.' \
-  'deploy dir: a-private-deploy-dir (rsync, no git)' > "$FIXTURE"
+  'deploy dir: /root/relay-example-deploy (rsync, no git)' > "$FIXTURE"
 git add "$FIXTURE" 2>/dev/null
 if bash "$SCAN" >/tmp/scan-root.$$ 2>&1; then
   echo "   FAIL: scanner passed a /root/ deployment path" >&2
@@ -182,7 +190,7 @@ msg_case() {   # msg_case <expected: pass|fail> <commit message>
 msg_case pass 'engine at 127.0.0.1:3080, bridge 172.28.0.0/24, publish 0.0.0.0:8080
 sample path /Users/someone/proj'
 msg_case pass 'HTTPS_PROXY=127.0.0.1:7897 did not work either'
-msg_case fail 'deploy dir is a-private-deploy-dir, rsync, no git'
+msg_case fail 'deploy dir is /root/relay-example-deploy, rsync, no git'
 msg_case fail 'HOME=/Users/jdoe leaked from the environment'
 rm -f "/tmp/scan-msg.$$" 2>/dev/null
 trap cleanup EXIT
