@@ -257,6 +257,34 @@ function verifyUrlSessionTokenForRearm(
 const GATE_EXEMPT_PATHS = new Set(['/health', '/ws/dsh', '/__devices', '/auth', EXPIRED_LANDING_PATH, '/favicon.ico']);
 
 /**
+ * Engine-admin routes that must NEVER be reachable through this relay.
+ *
+ * WHY: the tunnel forwards a paired device's request verbatim to the engine's
+ * loopback listener, so the engine cannot tell a phone from the local browser —
+ * both arrive as 127.0.0.1, from the tunnel process. Anything the local admin
+ * page can do is therefore remote-reachable too. Minting a pairing, revoking
+ * EVERY pairing, and switching the tunnel are exactly the operations a device
+ * must not perform on the machine it controls: each is self-inflicted denial of
+ * service for every device on that engine.
+ *
+ * Read-only routes of the same plugin (`GET /dsh-remote/session` for status,
+ * `GET /dsh-remote/url-session` for credential renewal) stay reachable — the
+ * paired app depends on them (see app/lib/services/session_scheduler.dart and
+ * machines_session_poller.dart). This list is the WRITE/lifecycle half only.
+ *
+ * Mirrored by `LOCAL_ADMIN_ROUTES` in plugin/src/index.ts. The tunnel stamps
+ * `x-dsh-remote-tunnel` on every forwarded request and the plugin refuses those
+ * routes when it sees that header, so the boundary survives a misconfigured
+ * relay as well as a compromised one. Both sides pin their own list in specs;
+ * changing one without the other is a security regression.
+ */
+const LOCAL_ADMIN_DENY: ReadonlySet<string> = new Set([
+  'POST /dsh-remote/session',
+  'DELETE /dsh-remote/session',
+  'POST /dsh-remote/tunnel',
+]);
+
+/**
  * v3.200：/auth 的 sec-fetch-site 归一化（实测 Android Chrome 153，2026-10-02）。
  *
  * 手机扫码进 SPA 的固定动线是「外部 app 唤起浏览器 → 配对 URL → 302 /auth」。
@@ -512,6 +540,21 @@ export async function buildServer(options: BuildServerOptions = {}) {
   //      JSON otherwise.
   fastify.addHook('onRequest', async (req, reply) => {
     const path = (req.url ?? '').split('?')[0]!;
+    // v3.282 engine-admin boundary. Checked FIRST — before every exemption —
+    // so no future GATE_EXEMPT_PATHS entry can widen it by accident.
+    if (LOCAL_ADMIN_DENY.has(`${req.method} ${path}`)) {
+      auditLogger.log({
+        sessionId: '',
+        eventType: 'remote_admin_blocked',
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        details: `${req.method} ${path} refused to a paired device (engine-admin boundary)`,
+      });
+      return reply.code(403).header('cache-control', 'no-store').send({
+        error: 'engine admin route is not reachable from a paired device',
+        hint: 'pairing, revocation and tunnel control live on the dsh host only',
+      });
+    }
     if (GATE_EXEMPT_PATHS.has(path)) return;
 
     // v3.173→v3.183：/assets/* 与 /plugins/* 维持免鉴权——script/link 标签
@@ -679,7 +722,8 @@ export async function buildServer(options: BuildServerOptions = {}) {
     // v3.172 Plan A：从命名空间化 cookie 挑合法 pairing——
     // X-Pairing-Id 缺省时按唯一性自动选，多 cookie 场景下 SPA 必须显式传。
     const pairing = pickPairingCookie(req.cookies, req.headers[PAIRING_ID_HEADER], isValidPairingCookie)
-    const session = pairing ? sessionManager.getSessionBySecret(pairing.secret) : undefined
+    const match = pairing ? sessionManager.authenticateSecret(pairing.secret) : undefined
+    const session = match?.session
     if (!session || !pairing || session.sessionId !== pairing.sessionId) {
       const isApi = path.startsWith('/api/');
       // v3.128.2.1 观测：闸门拒绝时记录实际收到的 cookie 指纹（截断），
@@ -704,6 +748,28 @@ export async function buildServer(options: BuildServerOptions = {}) {
         error: 'remote session expired or missing',
         hint: 're-scan the QR code on the dsh host to re-pair',
       });
+    }
+
+    // v3.282：宽限期内被顶替的旧 cookie 只够「着陆」——拿到那一次重定向，
+    // 让浏览器换上轮换后的新 cookie 继续走完链路。它不再拥有数据面读写权：
+    // 此前 90 秒里旧设备仍可读全部会话、执行命令，而界面早已显示它被踢下线。
+    if (match?.level === 'landing' && !(req.method === 'GET' && path === '/')) {
+      auditLogger.log({
+        sessionId: session.sessionId,
+        eventType: 'landing_grace_scope_refused',
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        details: `${req.method} ${path} refused: replaced device holds a grace-window cookie`,
+      })
+      logger.warn({ sid: session.sessionId, method: req.method, url: req.url }, 'landing_grace_scope_refused')
+      const wantsHtml = (req.headers.accept ?? '').includes('text/html')
+      if (wantsHtml) {
+        return reply.code(403).type('text/html; charset=utf-8').send(DEVICE_REPLACED_HTML)
+      }
+      return reply.code(403).send({
+        error: 'this pairing was replaced on another device',
+        hint: 'continue on the device that landed last',
+      })
     }
 
     // v3.128.1：带 cookie 过闸 = 设备真正连接（幂等首次打点，消费配对
@@ -1112,6 +1178,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
     // global). `/dsh-remote/*` is this project's own pairing-lifecycle prefix
     // (dsh-remote-relay-plugin's ROUTE_PREFIX) — registered separately so the
     // remote-control surface has its own name in the route table and audit log.
+    // v3.282: registering it does NOT mean a paired device may call it — the
+    // credential hook refuses LOCAL_ADMIN_DENY (mint / revoke / tunnel control)
+    // before routing, and only the read-only half of that prefix (status +
+    // url-session renewal, which the paired app depends on) reaches the engine.
     fastify.route({ method: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'] as const, url: '/dsh-remote/*', handler: wssHttpProxy })
     fastify.route({ method: ['GET', 'HEAD', 'OPTIONS'] as const, url: '/assets/*', handler: wssHttpProxy })
     fastify.route({ method: ['GET', 'HEAD', 'OPTIONS'] as const, url: '/', handler: wssHttpProxy })

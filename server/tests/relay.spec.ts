@@ -2146,3 +2146,180 @@ describe('URL session token (v3.173 第三条路)', () => {
     expect(sid).toBeTruthy()
   })
 });
+
+/**
+ * v3.282 engine-admin boundary.
+ *
+ * A paired device reaches the relay with a valid pairing cookie, so the
+ * credential gate alone cannot separate it from the admin page on the host.
+ * These cases pin the half of the plugin's prefix that a device must never
+ * drive, AND the read half it legitimately depends on (status polling and
+ * credential renewal — see app/lib/services/{machines_session_poller,
+ * session_scheduler}.dart), so the boundary cannot be "fixed" by blanket-
+ * denying the prefix and silently breaking the paired app.
+ */
+describe('v3.282 engine-admin boundary (paired device vs host admin)', () => {
+  let server: any;
+  let fastifyInstance: any;
+  let auditLogger: any;
+  const { dbPath, stateDbPath } = tmpDb('relay-admin');
+  let port: number;
+  let cookie: string;
+
+  beforeEach(async () => {
+    server = await buildServer({ psk: TEST_PSK, dbPath, stateDbPath, upstream: DEAD_UPSTREAM, publicHost: PUBLIC_HOST });
+    fastifyInstance = server.fastify;
+    auditLogger = server.auditLogger;
+    await fastifyInstance.listen({ port: 0, host: '127.0.0.1' });
+    port = (fastifyInstance.server.address() as any).port;
+
+    // Land a real pairing so every request below carries a VALID cookie:
+    // a 403 here is the admin boundary, never the credential gate.
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/dsh`, {
+      headers: { authorization: `Bearer ${TEST_PSK}` },
+    });
+    await new Promise((resolve) => ws.on('open', resolve));
+    ws.send(JSON.stringify({
+      type: 'session.register',
+      payload: { sessionId: 'sess_admin_fence', pairingToken: 'token_admin_fence', ttlSeconds: 300 },
+    }));
+    await new Promise((resolve) => ws.on('message', resolve));
+    ws.close();
+
+    const land = await fetch(
+      `http://127.0.0.1:${port}/?sessionId=sess_admin_fence&token=token_admin_fence`,
+      { redirect: 'manual' },
+    );
+    expect(land.status).toBe(302);
+    cookie = (land.headers.get('set-cookie') || '').split(';')[0];
+    expect(cookie).toBeTruthy();
+  });
+
+  afterEach(async () => {
+    auditLogger.close();
+    await fastifyInstance.close();
+  });
+
+  for (const method of ['POST', 'DELETE']) {
+    it(`${method} /dsh-remote/session is refused even to a paired device (mint / revoke-everything)`, async () => {
+      const res = await fetch(`http://127.0.0.1:${port}/dsh-remote/session`, {
+        method, redirect: 'manual', headers: { cookie },
+      });
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toMatch(/not reachable from a paired device/);
+    });
+  }
+
+  it('POST /dsh-remote/tunnel is refused (a device must not cut its own tunnel)', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/dsh-remote/tunnel`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'disconnect' }),
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('an unauthenticated caller is refused the same routes (no new information leaked)', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/dsh-remote/session`, {
+      method: 'POST', redirect: 'manual',
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('GET /dsh-remote/session still reaches the engine (the app polls it for status)', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/dsh-remote/session`, {
+      redirect: 'manual', headers: { cookie },
+    });
+    expect(res.status).not.toBe(403);
+  });
+
+  it('GET /dsh-remote/url-session still reaches the engine (the app renews its credential)', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/dsh-remote/url-session`, {
+      redirect: 'manual', headers: { cookie },
+    });
+    expect(res.status).not.toBe(403);
+  });
+});
+
+/**
+ * v3.282: the replacement grace window is a LANDING window, not an amnesty.
+ *
+ * The old assertion for this behaviour was `expect(graceA.status).not.toBe(401)`
+ * — which cannot tell 403 from 200, so tightening the window left the suite
+ * green. These cases assert the actual authority, and they are paired: the
+ * grace cookie must still complete the redirect it exists for, and must not
+ * reach anything with data behind it.
+ */
+describe('v3.282 replaced-device grace window is landing-only', () => {
+  let server: any;
+  let fastifyInstance: any;
+  let auditLogger: any;
+  let sessionManager: any;
+  const { dbPath, stateDbPath } = tmpDb('relay-grace');
+  let port: number;
+  let replacedCookie: string;
+
+  beforeEach(async () => {
+    server = await buildServer({ psk: TEST_PSK, dbPath, stateDbPath, upstream: DEAD_UPSTREAM, publicHost: PUBLIC_HOST });
+    fastifyInstance = server.fastify;
+    auditLogger = server.auditLogger;
+    sessionManager = server.sessionManager;
+    await fastifyInstance.listen({ port: 0, host: '127.0.0.1' });
+    port = (fastifyInstance.server.address() as any).port;
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/dsh`, {
+      headers: { authorization: `Bearer ${TEST_PSK}` },
+    });
+    await new Promise((resolve) => ws.on('open', resolve));
+    ws.send(JSON.stringify({
+      type: 'session.register',
+      payload: { sessionId: 'sess_grace', pairingToken: 'token_grace', ttlSeconds: 300 },
+    }));
+    await new Promise((resolve) => ws.on('message', resolve));
+    ws.close();
+
+    const landUrl = `http://127.0.0.1:${port}/?sessionId=sess_grace&token=token_grace`;
+    const deviceA = await fetch(landUrl, { redirect: 'manual' });
+    replacedCookie = (deviceA.headers.get('set-cookie') || '').split(';')[0];
+    await fetch(landUrl, { redirect: 'manual' }); // device B lands → rotates the secret
+  });
+
+  afterEach(async () => {
+    auditLogger.close();
+    await fastifyInstance.close();
+  });
+
+  it('the replaced cookie may still complete the landing redirect (that is what the window is for)', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/`, {
+      redirect: 'manual', headers: { cookie: replacedCookie },
+    });
+    // This suite points the upstream at a closed port, so a request that
+    // PASSES the gate surfaces as a proxy 500. The assertion is on the gate,
+    // not on the upstream: 401 or 403 would mean the grace window closed.
+    expect(res.status).not.toBe(401);
+    expect(res.status).not.toBe(403);
+  });
+
+  it('but it gets NO data-plane access inside the window', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/api/session.list`, {
+      redirect: 'manual', headers: { cookie: replacedCookie },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('and none of the plugin surface either', async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/dsh-remote/session`, {
+      redirect: 'manual', headers: { cookie: replacedCookie },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it('once the window closes the old cookie is simply gone (401)', async () => {
+    sessionManager.getSession('sess_grace')!.previousSecretAt = Date.now() - 91_000;
+    const res = await fetch(`http://127.0.0.1:${port}/api/session.list`, {
+      redirect: 'manual', headers: { cookie: replacedCookie },
+    });
+    expect(res.status).toBe(401);
+  });
+});

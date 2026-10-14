@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import { SessionStore, type StoredSession } from './store.js';
 
@@ -58,6 +59,43 @@ export interface ActiveSession {
 /** 旧密钥宽限窗：轮换后上一个 cookie 的存活时长。 */
 export const PREVIOUS_SECRET_GRACE_MS = 90 * 1000;
 
+/**
+ * How much authority a presented secret carries.
+ *
+ * v3.282: the grace window used to return the session itself, so a device that
+ * had just been replaced kept FULL read/write access to the engine for 90
+ * seconds — it could still run commands and read every conversation, long
+ * after the UI said it had been kicked. The window exists to heal a browser
+ * race (the landing request and the redirected request carrying different
+ * cookies), which needs the landing page and nothing more. Hence `landing`.
+ */
+export type SessionAuthLevel = 'full' | 'landing';
+
+/** What a presented secret resolved to, and how much it may do. */
+export interface SecretMatch {
+  session: ActiveSession;
+  level: SessionAuthLevel;
+}
+
+/**
+ * Digest form of a secret — the only form kept for lookup.
+ *
+ * WHY: the data plane's primary credential was compared with `===` in a loop
+ * over every session, while the PSK right next to it used timingSafeEqual. A
+ * secret is a bearer credential that turns up in proxy logs, so the compare
+ * that guards it should not leak its prefix through timing.
+ */
+function secretDigest(secret: string): string {
+  return crypto.createHash('sha256').update(secret).digest('hex');
+}
+
+/** Constant-time equality over fixed-length digests. */
+function digestEquals(a: string, b: string): boolean {
+  const left = Buffer.from(secretDigest(a));
+  const right = Buffer.from(secretDigest(b));
+  return timingSafeEqual(left, right);
+}
+
 export interface SessionManagerOptions {
   /** Re-bind window after the dsh tunnel drops (ms). Default 10 min. */
   graceMs?: number;
@@ -69,6 +107,14 @@ export interface SessionManagerOptions {
 export class SessionManager {
   private sessions: Map<string, ActiveSession> = new Map();
   private tokenMap: Map<string, string> = new Map();
+  /**
+   * Digest index for the data plane's primary credential. The plaintext
+   * sessionSecret still lives on the session (the engine and the store need
+   * it), but nothing LOOKS UP by it: a presented value is hashed and matched
+   * here, so a request costs one hash plus one map probe instead of a linear
+   * scan whose exit point depends on where the match sits.
+   */
+  private secretIndex: Map<string, string> = new Map();
   private graceMs: number;
   private maxAgeMs: number;
   private store?: SessionStore;
@@ -104,6 +150,7 @@ export class SessionManager {
       };
       this.sessions.set(session.sessionId, session);
       this.tokenMap.set(session.pairingToken, session.sessionId);
+      this.secretIndex.set(secretDigest(session.sessionSecret), session.sessionId);
     }
   }
 
@@ -148,6 +195,7 @@ export class SessionManager {
     };
     this.sessions.set(sessionId, session);
     this.tokenMap.set(pairingToken, sessionId);
+    this.secretIndex.set(secretDigest(sessionSecret), sessionId);
     this.store?.upsert(this.toStored(session));
     return session;
   }
@@ -180,32 +228,56 @@ export class SessionManager {
     return session;
   }
 
-  public getSessionBySecret(sessionSecret: string): ActiveSession | undefined {
+  /**
+   * Resolve a presented secret to its session and the authority it carries.
+   *
+   * v3.282: two changes at once. The lookup is now a digest probe (constant
+   * time, O(1)), and a hit on the PREVIOUS secret returns `landing` rather
+   * than the session itself — a replaced device keeps enough access to finish
+   * the redirect that carried it, and nothing else. The WS bridge already
+   * re-checked the current secret on connect; the HTTP data plane now honours
+   * the same rule instead of waving a stale cookie through for 90 seconds of
+   * full control.
+   */
+public authenticateSecret(sessionSecret: string): SecretMatch | undefined {
     const now = Date.now();
-    for (const session of this.sessions.values()) {
-      if (session.sessionSecret === sessionSecret) {
-        if (this.isExpired(session, now)) {
-          this.revokeSession(session.sessionId, 'session-expired');
-          return undefined;
-        }
-        return session;
-      }
-      // v3.128.2.1：旧密钥宽限——刚被轮换掉的 cookie 在宽限窗内仍认
-      if (
-        session.previousSecret === sessionSecret &&
-        session.previousSecretAt !== undefined &&
-        now - session.previousSecretAt < PREVIOUS_SECRET_GRACE_MS
-      ) {
-        return this.isExpired(session, now) ? undefined : session;
-      }
+    const sessionId = this.secretIndex.get(secretDigest(sessionSecret));
+    if (sessionId === undefined) return undefined;
+    const session = this.sessions.get(sessionId);
+    if (!session) return undefined;
+    if (this.isExpired(session, now)) {
+      this.revokeSession(sessionId, 'session-expired');
+      return undefined;
+    }
+    // A digest can only be in the index if it was one of this session's two
+    // secrets; decide which by a constant-time compare against each.
+    if (digestEquals(session.sessionSecret, sessionSecret)) {
+      return { session, level: 'full' };
+    }
+    if (
+      session.previousSecret !== undefined &&
+      digestEquals(session.previousSecret, sessionSecret) &&
+      session.previousSecretAt !== undefined &&
+      now - session.previousSecretAt < PREVIOUS_SECRET_GRACE_MS
+    ) {
+      return { session, level: 'landing' };
     }
     return undefined;
+  }
+
+  public getSessionBySecret(sessionSecret: string): ActiveSession | undefined {
+    return this.authenticateSecret(sessionSecret)?.session;
   }
 
   public revokeSession(sessionId: string, _reason?: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     this.tokenMap.delete(session.pairingToken);
+    // v3.282:索引必须跟着撤销走，否则被吊销的凭证摘要仍能命中一个空壳。
+    this.secretIndex.delete(secretDigest(session.sessionSecret));
+    if (session.previousSecret !== undefined) {
+      this.secretIndex.delete(secretDigest(session.previousSecret));
+    }
     this.sessions.delete(sessionId);
     this.store?.remove(sessionId);
   }
@@ -296,8 +368,12 @@ export class SessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) return undefined;
     session.previousSecret = session.sessionSecret;
+    // 旧 secret 降级为「仅着陆」，但仍需留在索引里：宽限期就是靠它自愈
+    // 着陆→302 链路上的 cookie 竞态，代价是权限等级而不是可否通过。
+    this.secretIndex.set(secretDigest(session.previousSecret), session.sessionId);
     session.previousSecretAt = Date.now();
     session.sessionSecret = crypto.randomBytes(32).toString('hex');
+    this.secretIndex.set(secretDigest(session.sessionSecret), session.sessionId);
     this.store?.upsert(this.toStored(session));
     return session.sessionSecret;
   }
