@@ -327,7 +327,7 @@ class L10nEn extends L10n {
   String get settingsAboutTitle => 'About';
 
   @override
-  String get settingsAboutSub => 'v0.1.0 · tunnel protocol v:1 · MIT';
+  String get settingsAboutSub => 'v0.0.1 · tunnel protocol v:1 · MIT';
 
   @override
   String get settingsFooter =>

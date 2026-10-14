@@ -56,6 +56,25 @@ void main() {
         reason: 'remote 指向 github.com:T0x7/dsh-remote-relay');
   });
 
+  // 第三处漂移（本轮真机上实际发生）：ARB 里 `settingsAboutSub` 写死了 `v0.1.0`，
+  // 设置页「关于」那一行就一直显示旧版本号，而 About 页显示常量里的新值——
+  // **同一个 App 页面出现两个版本号**。前两条守门只盯 pubspec / 常量 / CHANGELOG，
+  // 漏了 ARB。
+  //
+  // 注意这条**不是**禁止 ARB 里出现版本号（那会把刚改对的值也判违规），而是
+  // 断言它与 pubspec **一致**——一致性才是真正的不变量。
+  test('ARB 里的版本号必须与 pubspec 一致', () {
+    final semver = pubspecVersion().split('+').first;
+    for (final f in ['lib/l10n/app_zh.arb', 'lib/l10n/app_en.arb']) {
+      final body = File(f).readAsStringSync();
+      final versions =
+          RegExp(r'v\d+\.\d+\.\d+').allMatches(body).map((m) => m.group(0)!).toSet();
+      expect(versions, {'v$semver'},
+          reason: '$f 的文案里写死了版本号 $versions；它必须是 v$semver，'
+              '否则设置页会一直显示旧版本');
+    }
+  });
+
   test('拼出来的 release 接口必须是 200（真实网络，发布后才成立）', () async {
     // 这条要联网，且只在有发布时成立——所以它**不**是守门用例，
     // 而是发版后手测。我把它写成普通 test 但默认跳过，用环境变量开。

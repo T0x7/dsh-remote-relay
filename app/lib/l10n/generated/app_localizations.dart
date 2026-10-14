@@ -658,7 +658,7 @@ abstract class L10n {
   /// No description provided for @settingsAboutSub.
   ///
   /// In en, this message translates to:
-  /// **'v0.1.0 · tunnel protocol v:1 · MIT'**
+  /// **'v0.0.1 · tunnel protocol v:1 · MIT'**
   String get settingsAboutSub;
 
   /// No description provided for @settingsFooter.
