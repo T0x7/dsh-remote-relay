@@ -42,7 +42,7 @@
     "build": "pnpm run build:host && pnpm run build:client",
     "build:host": "tsc -p tsconfig.build.json",
     "build:client": "tsdown",
-    "prepare": "pnpm run build",
+    "prepare": "pnpm --filter dsh-remote-relay-client build && pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },

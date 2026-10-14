@@ -70,14 +70,37 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      # `flutter analyze` from app/ also walks packages/dsh_remote_core, and
+      # those specs import package:test — a dev_dependency of the NESTED
+      # package, which app's package_config does not carry. A developer's
+      # machine hides this because a previous `dart pub get` in that package
+      # left a .dart_tool/package_config.json behind for the analyzer to find;
+      # a fresh CI checkout has none, so every core spec fails to resolve its
+      # own test runner. Publish the nested config before analyzing, so CI
+      # sees what the developer's machine already sees.
+      - name: Pub get (dsh_remote_core, so its specs resolve package:test)
+        working-directory: app/packages/dsh_remote_core
+        run: dart pub get
       # 排版/i18n 这类「没人会主动去看」的规则必须由 CI 强制，否则它们会慢慢
       # 失效：每一次顺手改坏的排版都要有人拦。
       - name: Analyze
         run: flutter analyze
       # core 集成测试必须逐文件跑（多文件同跑会随机挂死，见
       # packages/dsh_remote_core 下的 README 注释），所以单独一步。
-      - name: Core API contract tests
-        run: flutter test packages/dsh_remote_core/test/api
+      #
+      # 两处都不对会让这一步永远红：跑在 app/ 里，`flutter test` 拿的是 app 的
+      # package_config，而 core 的 spec import 的是 core 自己的 dev_dependency
+      # `package:test`，app 那份里没有 —— 整批 spec 直接加载失败（Analyze 那步
+      # 此前就先红了，所以这一步从来没跑到过）。而且 `flutter test <目录>` 一次
+      # 合跑，正是 D-032 记的会挂死的写法。改成进 core 包逐文件 `dart test`，
+      # 包上下文和逐文件两件事同时对上。
+      - name: Core API contract tests (one file at a time; see TESTING.md)
+        working-directory: app/packages/dsh_remote_core
+        run: |
+          for f in test/api/*_test.dart; do
+            echo "── $f"
+            dart test "$f" || exit 1
+          done
       # UI 巡检单独点名跑一次：它是「所有界面 × 所有状态 × 所有子表面」的
       # 覆盖面清单（app/test/ui_sweep/）。在全量输出里它会被淹没，单独跑
       # 才能在 CI 日志里一眼看到覆盖面。
