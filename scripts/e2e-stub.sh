@@ -22,6 +22,15 @@ trap cleanup EXIT
 fail() {
   echo "[e2e-stub] FAIL: $1" | tee -a "$OUT" >/dev/null
   cat "$OUT"
+  # The services log into temp files this script otherwise never reads, so a
+  # service that died at boot reported a blank line and nothing else. Any
+  # failure here dumps them.
+  for f in relay serve pair; do
+    if [ -s "$TMP/$f.log" ]; then
+      echo "[e2e-stub] --- $f.log (tail) ---"
+      tail -20 "$TMP/$f.log"
+    fi
+  done
   exit 1
 }
 
@@ -41,7 +50,12 @@ cd $ROOT/server && HOST=127.0.0.1 PORT=8083 RELAY_PSK=$PSK RELAY_PUBLIC_HOST=127
   node dist/index.js >>$TMP/relay.log 2>&1 &
 RELAY_PID=$!
 for i in $(seq 1 50); do curl -sf -m 2 http://127.0.0.1:8083/health >/dev/null 2>&1 && break; sleep 0.2; done
-echo "[e2e-stub] relay /health: $(curl -s -m 3 http://127.0.0.1:8083/health)" >> $OUT
+HEALTH=$(curl -s -m 3 http://127.0.0.1:8083/health)
+echo "[e2e-stub] relay /health: $HEALTH" >> $OUT
+# A relay that never came up used to be reported as a blank /health line, and
+# the next two steps then failed on a pairing that was never going to happen.
+# Say so here instead, with the boot log attached.
+[ -n "$HEALTH" ] || fail "relay never became healthy"
 
 # client serve (holds tunnel)
 cd $ROOT/client && DSH_REMOTE_RELAY_URL=http://127.0.0.1:8083 DSH_REMOTE_PSK=$PSK \
