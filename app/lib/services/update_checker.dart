@@ -37,7 +37,17 @@ class _HttpUpdateChecker implements UpdateChecker {
     final uri = Uri.https('api.github.com', '/repos/$repo/releases');
     try {
       final body = await _httpGet(uri);
-      final decoded = jsonDecode(body);
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(body);
+      } on FormatException {
+        // 被限流、被网关拦下、拿到 5xx 的 HTML 错误页——body 不是 JSON 时
+        // `jsonDecode` 抛的是 FormatException，它**在下面那行 `is! List` 之前**
+        // 就出去了。若只保留 `is! List` 分支，UpdateError.badJson 就没有生产者，
+        // 用户看到的会是带换行和插入符的 Dart 异常原文（"FormatException:
+        // Unexpected character … ^"）。这正是 badJson 存在的意义。
+        return UpdateCheck.failed(UpdateError.badJson);
+      }
       if (decoded is! List) return UpdateCheck.failed(UpdateError.badJson);
       return UpdateCheck.fromReleaseList(decoded.cast<Map<dynamic, dynamic>>());
     } on Object catch (e) {

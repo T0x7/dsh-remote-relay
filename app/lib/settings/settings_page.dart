@@ -5,6 +5,7 @@ import '../data/machines_repository.dart';
 import '../data/settings_store.dart';
 import '../l10n/generated/app_localizations.dart';
 import '../services/update_checker.dart';
+import 'about_info.dart';
 import '../lock/biometric_gate.dart';
 import '../ui/theme.dart';
 import 'about_page.dart';
@@ -163,34 +164,63 @@ class _SettingsPageState extends State<SettingsPage> {
   /// 「零遥测」是这个 App 对外声明的卖点之一（关于页），一个静默的对外请求会
   /// 让那句话变成谎。
   UpdateCheck? _update;
+  bool _checking = false;
 
-  String _updateSubtitle(L10n l10n) {
+  /// 三种结果**各自都要有话说**。第一版只有「发现新版」有反馈，其余两条回落成
+  /// 默认文案——于是「已经是最新版」看起来就是**点了没反应**，而网络失败被
+  /// 显示成「未检查」，比不显示更误导。
+  ///
+  /// 副标题与 SnackBar 共用这一个函数：同一个 switch 写两遍，迟早漂成「副标题
+  /// 说失败、弹窗说成功」，而本轮消灭的正是这类不一致。
+  String? _updateOutcome(L10n l10n) {
     final r = _update;
-    if (r == null) return l10n.settingsUpdateCheckSub;
-    if (!r.available) {
-      if (r.error is UpdateError) {
-        return l10n.updateCheckFailed(switch (r.error! as UpdateError) {
-          UpdateError.badJson => l10n.updateErrBadJson,
-          UpdateError.noTag => l10n.updateErrNoTag,
-        });
-      }
-      if (r.error != null) return l10n.updateCheckFailed(l10n.updateCheckIdle);
-      return l10n.settingsUpdateCheckSub;
+    if (r == null) return null;
+    if (r.error != null) {
+      final reason = switch (r.error!) {
+        final UpdateError e => switch (e) {
+            UpdateError.badJson => l10n.updateErrBadJson,
+            UpdateError.noTag => l10n.updateErrNoTag,
+          },
+        final Object e => e.toString(),
+      };
+      return l10n.updateCheckFailed(reason);
     }
+    if (!r.available) return l10n.updateCheckUpToDate(r.current ?? kAppVersion);
     final mb = r.bytes == null ? '' : ' · ${l10n.updateCheckSize(_mb(r.bytes!))}';
     return l10n.updateCheckAvailable(r.latest!) + mb;
   }
 
+  String _updateSubtitle(L10n l10n) => _checking
+      ? l10n.updateCheckChecking
+      : _updateOutcome(l10n) ?? l10n.settingsUpdateCheckSub;
+
   static String _mb(int bytes) => (bytes / 1024 / 1024).toStringAsFixed(1);
 
   Future<void> _runUpdateCheck() async {
-    setState(() => _update = null); // 触发「正在检查…」
-    final l10n = L10n.of(context);
+    setState(() {
+      _checking = true;
+      _update = null;
+    });
     final result = await UpdateChecker.instance().fetch()
       ..logAudit();
     if (!mounted) return;
-    setState(() => _update = result);
-    if (result.available && result.url != null) {
+    setState(() {
+      _checking = false;
+      _update = result;
+    });
+    // l10n 在 await **之后**取——等待期间用户可能刚切了语言。
+    final l10n = L10n.of(context);
+    final opensDialog = result.available && result.url != null;
+    // 三种结果都给一次明确反馈：副标题是小字，用户很容易当成「没反应」。
+    // 但「有新版且有下载地址」马上要弹对话框了，那时再弹 SnackBar 是同一条
+    // 信息说两遍——对话框本身就是更显眼的那次反馈。
+    final banner = _updateOutcome(l10n);
+    if (banner != null && !opensDialog) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(content: Text(banner)));
+    }
+    if (opensDialog) {
       // 只提示，不自动装：Android 没有签名密钥吊销机制，而自动更新通道一旦被
       // 攻破，等于让攻击者往一台能远程操控你电脑的手机里装任意代码。
       await showDialog<void>(
