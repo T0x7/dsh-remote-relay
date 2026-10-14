@@ -365,6 +365,49 @@ function parseUpstreamHost(upstream: string) {
   };
 }
 
+/**
+ * Client IP for the bare-upgrade paths (no fastify lifecycle, hence no req.ip).
+ *
+ * v3.282: these handlers read X-Forwarded-For unconditionally, so any client
+ * could set the header and forge its IP into audit records and rate-limit
+ * buckets — the per-IP PSK brute-force alarm could never fire. XFF is now
+ * honoured only when the DIRECT peer is a configured proxy; fastify's own
+ * `req.ip` keeps the same rule on the HTTP paths.
+ *
+ * Exact-IP match by design: the default trust list is the local nginx hop
+ * (`127.0.0.1,::1`); deployments with docker-network hops list the exact
+ * container IP in RELAY_TRUST_PROXY.
+ */
+export function resolveClientIp(remoteAddress: string | undefined, xffHeader: string | undefined, trustedProxiesCsv: string): string {
+  const direct = remoteAddress || 'unknown';
+  const trusted = trustedProxiesCsv.split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (!trusted.includes(direct)) return direct;
+  const firstHop = xffHeader?.split(',')[0]?.trim();
+  return firstHop || direct;
+}
+
+/** Which proxy IPs XFF may come from (same list fastify's trustProxy uses). */
+let trustProxyCsv = '127.0.0.1,::1';
+
+/**
+ * Audit-safe cookie fingerprint: how many cookies and how long each value is.
+ *
+ * v3.282: the old fingerprint sliced the first 36 bytes of the header into
+ * audit details — pino redacts `cookie` on the log path, but the SQLite audit
+ * store is a different sink and kept the prefix forever. Cookie values ARE
+ * bearer credentials; only their shape belongs in an audit trail.
+ */
+export function cookieFingerprint(cookieHeader: string | undefined): string {
+  if (!cookieHeader) return 'NONE';
+  const parts = cookieHeader.split(';').map((part) => {
+    const eq = part.indexOf('=');
+    const name = (eq === -1 ? part : part.slice(0, eq)).trim();
+    const valueLen = eq === -1 ? 0 : part.length - eq - 1;
+    return `${name || '?'}:len=${valueLen}`;
+  });
+  return `${parts.length}条 ${parts.join(',')}`;
+}
+
 /** Constant-time secret comparison — the PSK check is remotely reachable. */
 function secretEquals(a: string, b: string): boolean {
   const bufA = Buffer.from(a, 'utf8');
@@ -421,12 +464,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // Extra WS upgrade paths to bridge (plugin-owned realtime streams).
   const wsBridgePaths = options.wsBridgePaths ?? parseWsBridgePaths(process.env.RELAY_WS_BRIDGE_PATHS);
   const logger = options.logger ?? createLogger();
+  // v3.282：裸 upgrade 路径与 fastify 共用同一份信任名单。
+  trustProxyCsv = options.trustProxy || process.env.RELAY_TRUST_PROXY || '127.0.0.1,::1';
   const fastify = Fastify({
     logger: false,
+    // v3.282：显式 4MB——此前靠默认 1MB 兜底，与隧道数据面 MAX_REQ_BODY
+    // (4MiB) 不一致：本机直连引擎放行的请求体经 relay 会被 413。
+    bodyLimit: 4 * 1024 * 1024,
     // Only the nginx hop (default loopback; docker deployments set the nginx
     // container IP). trustProxy:true would let any client spoof
     // X-Forwarded-For — bypassing the per-IP rate limit and forging audit IPs.
-    trustProxy: options.trustProxy || process.env.RELAY_TRUST_PROXY || '127.0.0.1,::1',
+    trustProxy: trustProxyCsv,
   });
 
   const auditLogger = new RelayAuditLogger(options.dbPath);
@@ -729,7 +777,9 @@ export async function buildServer(options: BuildServerOptions = {}) {
       // v3.128.2.1 观测：闸门拒绝时记录实际收到的 cookie 指纹（截断），
       // 区分「完全没带」「带了旧值」——着陆成功同秒被拒的定位依赖它
       const cookieHdr = String(req.headers.cookie ?? '');
-      const cookieFp = cookieHdr ? `${cookieHdr.split(';').length}条 ${cookieHdr.slice(0, 36)}` : 'NONE';
+      // v3.282：指纹只记名字与值长度——值本身是 bearer 凭证，pino 的 redact
+      // 管不到 SQLite 审计库。
+      const cookieFp = cookieFingerprint(req.headers.cookie as string | undefined);
       auditLogger.log({
         eventType: isApi ? 'api_auth_missing' : 'gate_auth_missing',
         ip: req.ip,
@@ -930,12 +980,15 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // 由其 node:ws client 连 dsh，双向 ws.frame 桥接。浏览器侧握手 + 帧
   // 编解码用 ws 包 noServer 模式（handleUpgrade 在收到 plugin 的
   // ws.accept 之后才执行——dsh 真接受升级才回 101，不撒谎）。
-  const wssNoServer = new WsNoServer({ noServer: true })
+  // v3.282：帧上限 4MB——ws 默认 100MiB/帧，一条 /api/events.* 桥接就能把
+  // relay 与引擎内存打满。与 plugin 侧请求体/响应体上限同族（4MiB）。
+  const WS_FRAME_LIMIT = 4 * 1024 * 1024;
+  const wssNoServer = new WsNoServer({ noServer: true, maxPayload: WS_FRAME_LIMIT })
   // v3.152.4：/ws/dsh（plugin 出站通道）也走裸 WebSocketServer——
   // 替代 @fastify/websocket（避免它的全局 upgrade listener 抢在我们总
   // handler 之前 destroy 不匹配路径）。handleUpgrade 拿到 ws 实例后，PSK 校验 +
   // session.register + WSS 数据面消息分发 与原本 fastify 装饰器 cb 同款。
-  const wsTunnelServer = new WsNoServer({ noServer: true })
+  const wsTunnelServer = new WsNoServer({ noServer: true, maxPayload: WS_FRAME_LIMIT })
   interface WssPendingUpgrade {
     req: http.IncomingMessage
     socket: Duplex
@@ -1248,9 +1301,10 @@ export async function buildServer(options: BuildServerOptions = {}) {
   })
 
   function handleTunnelConnection(socket: WsBrowserSide, req: http.IncomingMessage) {
-    // v3.152.4：裸 IncomingMessage 没有 fastify 的 .ip 属性——手工取
-    // X-Forwarded-For 首跳（nginx 前置形态）或 socket 地址。
-    const ip = (req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()) || req.socket.remoteAddress || 'unknown'
+    // v3.282：XFF 只信直连为受信代理的请求——裸 IncomingMessage 没有
+    // fastify 的 .ip，原实现无条件取首跳，任何客户端可伪造审计 IP 并
+    // 让 per-IP 暴破告警永不触发。
+    const ip = resolveClientIp(req.socket.remoteAddress, req.headers['x-forwarded-for']?.toString(), trustProxyCsv)
     const authHeader = req.headers['authorization'] || '';
     const token = authHeader.replace(/^Bearer\s+/i, '');
 
@@ -1281,6 +1335,14 @@ auditLogger.log({
       // 重连时按 v3.162 旧行为踢旧（防 plugin_not_connected 死锁）。
       // 详见 2026-09-09-per-pairing-socket-design.md §4.2。
       let socketPairingKey: PairingKey | null = null
+
+      // v3.282：maxPayload 超限时 ws 先 emit 'error' 再 close——没有监听的
+      // 'error' 会以未捕获异常炸掉 relay 进程。引擎侧隧道是最高价值链路，
+      // 必须自带兜底。
+      socket.on('error', (err) => {
+        logger.warn({ err: (err as Error).message }, 'dsh_tunnel_ws_error')
+        try { socket.close(1011, 'ws error') } catch { /* already closing */ }
+      })
 
       socket.on('message', (raw) => {
         try {
@@ -1390,6 +1452,12 @@ auditLogger.log({
               clearTimeout(pendingWs.timer);
               wssPendingUpgrades.delete(msg.id);
 wssNoServer.handleUpgrade(pendingWs.req, pendingWs.socket, pendingWs.head, (browserWs) => {
+                // v3.282：同隧道 socket——maxPayload/帧解析错误先走 'error'，
+                // 无监听即未捕获异常。浏览器事件流不允许带走 relay。
+                browserWs.on('error', (err) => {
+                  logger.warn({ err: (err as Error).message }, 'events_bridge_ws_error')
+                  try { browserWs.close(1011, 'ws error') } catch { /* already closing */ }
+                })
                 // v3.206：桥接建立时再校验授权密钥仍是当前 sessionSecret——堵住
                 // 「A 着陆→SPA 还在加载→B 着陆轮换→A 的事件流才建」的时间竞态
                 // （v3.205 着陆时掐断覆盖 WS 已在飞的场景；此处覆盖 WS 后到的场景）。
@@ -1408,6 +1476,14 @@ wssNoServer.handleUpgrade(pendingWs.req, pendingWs.socket, pendingWs.head, (brow
                 wssBridgedWs.set(msg.id, { ws: browserWs as WsBrowserSide, dropStream, pairingKey: socketPairingKey ?? '', authorizedSecret: pendingWs.authorizedSecret });
                 browserWs.on('message', (data: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
                   const buf = Buffer.isBuffer(data) ? data : Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer);
+                  // v3.282：上行与下行同限——此前只有下行(plugin→浏览器)有 4MB
+                  // 检查，上行(浏览器→plugin)无限，一条桥接可持续推巨帧打满两端。
+                  if (buf.length > WS_FRAME_LIMIT) {
+                    browserWs.close(1009, 'payload too large');
+                    wssBridgedWs.delete(msg.id);
+                    dropStream();
+                    return;
+                  }
                   const payload = isBinary ? buf.toString('base64') : buf.toString('utf8');
                   // v3.170：上行帧必须由当前 pairing 的 socket 转发——不再用
                   // 全局单值；闭包持有当前 socket 引用，安全。
@@ -1603,8 +1679,7 @@ wssNoServer.handleUpgrade(pendingWs.req, pendingWs.socket, pendingWs.head, (brow
         socket.destroy();
         return;
       }
-      const fwdFor = String(req.headers['x-forwarded-for'] ?? '');
-      const wsClientIp = fwdFor.split(',')[0]?.trim() || req.socket.remoteAddress || undefined;
+      const wsClientIp = resolveClientIp(req.socket.remoteAddress, req.headers['x-forwarded-for']?.toString(), trustProxyCsv);
       const wsFrameId = crypto.randomUUID();
       sessionManager.markConnected(session.sessionId);
       sessionManager.markSeen(session.sessionId, wsClientIp);
@@ -1650,8 +1725,7 @@ wssNoServer.handleUpgrade(pendingWs.req, pendingWs.socket, pendingWs.head, (brow
     // 与 dsh 握手后双向 pipe（v3.143 baseline）
     const { hostname, port } = parseUpstreamHost(dshUpstream);
     sessionManager.markConnected(session.sessionId);
-    const fwdFor = String(req.headers['x-forwarded-for'] ?? '');
-    const wsClientIp = fwdFor.split(',')[0]?.trim() || req.socket.remoteAddress || undefined;
+    const wsClientIp = resolveClientIp(req.socket.remoteAddress, req.headers['x-forwarded-for']?.toString(), trustProxyCsv);
     sessionManager.markSeen(session.sessionId, wsClientIp);
     liveStreams.set(session.sessionId, (liveStreams.get(session.sessionId) ?? 0) + 1);
     let streamCounted = true;

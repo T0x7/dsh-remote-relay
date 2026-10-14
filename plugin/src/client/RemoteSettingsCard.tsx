@@ -125,7 +125,7 @@ export function RemoteSettingsCard(props: {
   const handleDisconnectAll = async () => {
     // 断开 = 终止远程控制：隧道关闭 + 撤销全部配对。恢复唯一路径是重新
     // 选择模式并扫码（用户拍板语义：断开必须彻底，不做一键重连）。
-    if (!window.confirm('断开中继并撤销所有已配对设备？已配对设备将立即失效，恢复需在本机重新选择模式并扫码。')) {
+    if (!window.confirm('断开中继并撤销所有已配对设备？已配对设备将立即失效，恢复需在本机重新生成二维码并扫码。')) {
       return;
     }
     setToggling(true);
@@ -155,7 +155,7 @@ export function RemoteSettingsCard(props: {
 
   return (
     <div style={{ padding: 16, border: '1px solid var(--border-subtle, #333)', borderRadius: 8 }}>
-      <h3 style={{ margin: '0 0 12px 0' }}>公网远程控制 (Remote Relay)</h3>
+      <h3 style={{ margin: '0 0 12px 0' }}>{zh.title}</h3>
       <p style={{ color: '#888', fontSize: 13 }}>
         通过安全的出站中继通道，使用手机扫码即可直接查看和操作当前 dsh 实例。
       </p>
@@ -194,12 +194,14 @@ export function RemoteSettingsCard(props: {
       </div>
       {tunnel?.manualOff || tunnel?.state === 'disabled' ? (
         <div style={{ marginTop: 6, fontSize: 12, color: '#e57373' }}>
-          中继已断开，所有已配对设备已失效。恢复远程访问：点击下方「开启远程控制」生成新二维码 → 手机重新扫码。
+          {sessions.length > 0
+            ? '中继已断开，所有已配对设备已失效。恢复远程访问：点击下方「开启远程控制」生成新二维码 → 手机重新扫码。'
+            : '中继未连接。点击下方「开启远程控制」生成配对二维码。'}
         </div>
       ) : null}
       {tunnel?.state === 'connected' && sessions.length === 0 ? (
         <div style={{ marginTop: 6, fontSize: 12, color: '#8ab4f8' }}>
-          连接正常，尚无配对设备——点击下方「开启远程控制」生成 24 小时有效的配对二维码（在本机生成，远程只读页面无法生成）。
+          连接正常，尚无配对设备——点击下方「开启远程控制」生成 24 小时有效的配对二维码（在本机生成）。
         </div>
       ) : null}
 

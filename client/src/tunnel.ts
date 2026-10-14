@@ -444,10 +444,20 @@ export class RemoteTunnelClient {
           if (msg.type === 'session.registered') {
             console.log(`[dsh-remote-client] pairing session ${msg.sessionId} registered on relay`);
           } else if (msg.type === 'http.req') {
-            // 收到 phone 的 HTTP 请求 — 经 WSS 反代，本地打 dsh
-            void this.handleHttpReq(msg)
+            // 收到 phone 的 HTTP 请求 — 经 WSS 反代，本地打 dsh。
+            // v3.282:拒绝必须接住——handleHttpReq 里有同步抛点（http.request
+            // 对非法 method/path 直接 TypeError），而 void 链上的未捕获 rejection
+            // 在默认 --unhandled-rejections=throw 下会杀死整个引擎进程。
+            this.handleHttpReq(msg).catch((err) => {
+              console.error(`[dsh-remote-client] http bridge crashed for id=${String(msg.id).slice(0, 8)}:`, (err as Error).message)
+              this.sendDataPlaneFrame({ v: 1, type: 'error', id: msg.id, code: 'bridge_error', message: 'request could not be fulfilled' })
+            })
           } else if (msg.type === 'ws.upgrade') {
-            void this.handleWsUpgrade(msg)
+            this.handleWsUpgrade(msg).catch((err) => {
+              console.error(`[dsh-remote-client] ws bridge crashed for id=${String(msg.id).slice(0, 8)}:`, (err as Error).message)
+              this.sendDataPlaneFrame({ v: 1, type: 'error', id: msg.id, code: 'bridge_error', message: 'upgrade could not be fulfilled' })
+              this.sendDataPlaneFrame({ v: 1, type: 'ws.close', id: msg.id, code: 1011, reason: 'bridge error' })
+            })
           } else if (msg.type === 'ws.frame' && msg.dir === 'up') {
             // v3.152.4 PR-WS-bridge：phone→dsh 上行帧——写入对应桥接连接。
             // opcode 2（binary）时 payload 是 base64，与下行约定对称。
