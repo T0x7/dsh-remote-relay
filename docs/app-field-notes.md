@@ -742,3 +742,39 @@ relay     {"msg":"url_session_rearm_expired_token_allowed","sid":"sess_prodcheck
 
 **手机那台仍未由这条路径恢复**：它的凭证在我到场前已是新的（卡片「第 1/30 天」），
 设备与 relay 两侧都没有 renew / rearm 记录，最合理解释是期间被重新配对过。
+
+### 6.20 PSK 缺失不该是「拒启让人干瞪眼」（D-112，运维拍板）
+
+**决定**（运维口述，两条硬规则）：**relay 侧 PSK 没配置就自动重新生成一把，长度
+32 位起步；dsh 客户端插件必须配置才可以使用。**
+
+**为什么自动生成而不是继续拒启。** 之前缺 PSK 的表现是
+`refusing to start — unsafe relay configuration: RELAY_PSK is unset…`。对一个
+第一次自部署的人来说那是：装完了、起不来了、错误信息告诉他去设一个变量——但
+**没人告诉他该设成什么值**。生成 + 落盘 + 打印路径，把「不知道填什么」变成
+「`cat` 这个文件复制过去」。
+
+**实现要点**：
+
+- `generatePsk()` 用 `crypto.randomBytes(32)` → 64 个 hex 字符（`Math.random`
+  在根秘密的种子源上不可接受）；`MIN_PSK_LENGTH = 32` 是下限。
+- **不回写 `.env`**：部署形态是 `env_file: .env`，docker compose 在**宿主机**上
+  读它，容器里根本没有这个文件，写了也会在容器重建时蒸发。落盘位置是**数据卷**
+  `<dataDir>/generated-psk`（`/app/data`，真正跨容器重建存活）。
+- 重启**复用**同一把（否则自己的重启就会打断隧道）；落盘值短于下限 → 当作没有、
+  重新生成（宁可换掉也别留一把弱钥匙）。
+- env 里**显式设成那个公开默认值**按「没设」处理——它本来就等于公开。
+- 启动提示**只打印路径不打印值**：密钥不进日志（仓库有 `scripts/scan-secrets.sh`），
+  操作者照着路径 `cat`。
+- `assertProductionConfig` 的拒绝逻辑**保留为最后一道防线**，并新增长度校验——
+  防的是有人绕过 `resolvePsk` 直接构造 config 调过来（buildServer 直调、脚本）。
+  因此既有守卫用例的夹具从 21 字符的 `TEST_PSK` 换成 64 字符，否则新校验会误伤。
+
+**守门**：6 条（env 优先且不生成 / 缺失则生成并落盘 / 公开默认按没设 / 重启复用 /
+弱值重生成 / 真生成器 64 hex 且两次不同）+ 长度守卫 1 条。回退即红：4 条同时变红。
+server 103/103。
+
+**插件侧待做**（agent-stock 仓）：`psk` 缺失或等于
+`agent-stock-default-insecure-psk` → 拒绝启用。relay 侧本来就有这道守卫
+（`config.ts:101-110`），**两边不对称**：本轮讨论中先被误判成「relay 的洞」，
+其实是引擎插件缺了同一道防线。

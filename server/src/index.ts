@@ -8,11 +8,12 @@ import http from 'node:http';
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from 'node:http';
 import crypto from 'node:crypto';
 import { URL, pathToFileURL } from 'node:url';
+import path from 'node:path';
 import { SessionManager } from './session.js';
 import { SessionStore } from './store.js';
 import { RelayAuditLogger } from './audit.js';
 import { createLogger, type RelayLogger } from './logger.js';
-import { loadConfig, assertProductionConfig, DEFAULT_INSECURE_PSK, parseWsBridgePaths } from './config.js';
+import { loadConfig, assertProductionConfig, resolvePsk, DEFAULT_INSECURE_PSK, parseWsBridgePaths } from './config.js';
 import type { RegisterSessionPayload, RevokeSessionPayload } from './protocol.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
@@ -1668,9 +1669,32 @@ const isProcessEntry = process.argv[1]
 
 if (isProcessEntry && process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
   const config = loadConfig();
+  // PSK 决议：env 里有一把像样的就用它；没有（或等于那个公开默认值）就用上次
+  // 自动生成落盘的；再没有就**现生成一把并落盘**，只打印路径不打印值——密钥
+  // 不进日志，操作者照着路径 `cat` 出来填进 dsh 的 remote.relay.psk。
+  const pskResolution = resolvePsk({
+    envPsk: process.env.RELAY_PSK,
+    dataDir: path.dirname(config.dbPath),
+  });
+  config.psk = pskResolution.psk;
   // Fail-closed boot: refuse to serve on the default PSK or without a pinned
   // public Host — both silently break the two-gate trust model.
   assertProductionConfig(config);
+
+  if (pskResolution.source !== 'env') {
+    console.warn(
+      [
+        '',
+        '  ┌─ relay PSK 需要你做一件事 ─────────────────────────────',
+        `  │ 本次启动用的是${pskResolution.source === 'generated' ? '**新生成**的' : '上次生成的'} RELAY_PSK，`,
+        `  │ 保存在：${pskResolution.path}`,
+        '  │ dsh 客户端的 remote.relay.psk 必须填成同一把，否则隧道连不上。',
+        `  │ 查看：cat ${pskResolution.path}`,
+        '  └────────────────────────────────────────────────────────',
+        '',
+      ].join('\n'),
+    );
+  }
 
   const { fastify } = await buildServer({
     psk: config.psk,

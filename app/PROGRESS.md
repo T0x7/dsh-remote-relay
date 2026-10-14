@@ -1052,3 +1052,24 @@ App 侧：`sweep()` 不再跳过过期条目（带 5min→30min→2h 退避）�
 session 会被 `!sessionManager.getSession(sid)` 挡下，口子没有变成万能钥匙。
 
 一次性测试文件已删除（依赖环境变量 + 打生产，留在 test/ 是陷阱），配方记在此处。
+
+### D-112 PSK 自动生成（relay 侧）+ 插件侧必配
+
+运维拍板：relay 缺 PSK → 自动重新生成，长度 **32 位起步**；dsh 插件必须配置才能用。
+
+relay 侧（`server/src/config.ts` + `index.ts`）：
+- `generatePsk()` = `randomBytes(32).toString('hex')` = 64 hex 字符；
+  `MIN_PSK_LENGTH = 32`；
+- `resolvePsk()` 决议顺序：`env.RELAY_PSK`（非公开默认）→ 数据卷里上次生成的
+  → 现生成并落盘到 `<dataDir>/generated-psk`（**不回写 `.env`**：那是 docker
+  compose 在宿主机上读的，容器里没有，写了也会随容器重建蒸发）；
+- 重启复用同一把；落盘值过短 → 重生成；env 显式设成公开默认 → 按没设处理；
+- 启动提示**只给路径不给值**（密钥不进日志）；
+- `assertProductionConfig` 保留为最后一道防线并新增长度校验（防绕过
+  resolvePsk 直构 config）；既有守卫夹具从 21 字符 TEST_PSK 换 64 字符。
+
+守门 7 条，回退即红 4 条同时变红。server 103/103。
+
+插件侧（agent-stock 仓，`agent-stock-remote`）：`psk` 缺失或等于
+`agent-stock-default-insecure-psk` → 拒绝启用。**relay 侧本来就有这道守卫，两边
+不对称**——今天讨论时先被误判成 relay 的洞，实为插件缺同一道防线。待做。

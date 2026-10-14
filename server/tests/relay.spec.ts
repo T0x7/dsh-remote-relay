@@ -3,7 +3,17 @@ import { buildServer } from '../src/index.js';
 import { SessionManager } from '../src/session.js';
 import { SessionStore } from '../src/store.js';
 import { RelayAuditLogger } from '../src/audit.js';
-import { assertProductionConfig, isValidAuthority, loadConfig, type RelayConfig } from '../src/config.js';
+import {
+  assertProductionConfig,
+  isValidAuthority,
+  loadConfig,
+  resolvePsk,
+  generatePsk,
+  MIN_PSK_LENGTH,
+  DEFAULT_INSECURE_PSK,
+  GENERATED_PSK_FILENAME,
+  type RelayConfig,
+} from '../src/config.js';
 import { runWatchdogOnce, analyzeAudit } from '../src/watchdog.js';
 import { createLogger } from '../src/logger.js';
 import WebSocket from 'ws';
@@ -567,8 +577,11 @@ describe('Gate Coverage (v3.106 全路径闸门)', () => {
 // ---------------------------------------------------------------------------
 
 describe('Fail-closed boot guard (config.ts)', () => {
+  // 用一把**像样的** PSK（≥MIN_PSK_LENGTH）：新加的长度校验是最后一道防线，
+  // 夹具不该拿 21 字符的 TEST_PSK 去假装生产配置。
+  const STRONG_PSK = 'a'.repeat(64);
   function cfg(overrides: Partial<RelayConfig>): RelayConfig {
-    return { ...loadConfig({}), psk: TEST_PSK, publicHost: PUBLIC_HOST, ...overrides };
+    return { ...loadConfig({}), psk: STRONG_PSK, publicHost: PUBLIC_HOST, ...overrides };
   }
 
   it('buildServer 没有 publicHost 直接抛错（防 PRIVILEGED 解锁的 Host 改写回归）', async () => {
@@ -583,6 +596,80 @@ describe('Fail-closed boot guard (config.ts)', () => {
     expect(() => assertProductionConfig(cfg({ publicHost: 'https://relay.example.com' }))).toThrow(/canonical bare authority/);
     expect(() => assertProductionConfig(cfg({ publicHost: 'relay.example.com/path' }))).toThrow(/canonical bare authority/);
     expect(() => assertProductionConfig(cfg())).not.toThrow();
+  });
+
+  it('PSK 短于下限 → 最后一道防线仍然拒启', () => {
+    expect(() => assertProductionConfig(cfg({ psk: 'short-psk' }))).toThrow(/32-char minimum/);
+    expect(() => assertProductionConfig(cfg())).not.toThrow();
+  });
+
+  // ── PSK 自动生成（D-112）─────────────────────────────────────
+  //
+  // 运维拍板：缺 PSK 就不该是「refusing to start」让人干瞪眼，而是生成一把、
+  // 落盘、告诉他填到哪去。上一条守卫（拒绝不安全默认）保留为最后一道防线。
+  describe('resolvePsk', () => {
+    function fake() {
+      const files = new Map<string, string>();
+      let generated = 0;
+      return {
+        files,
+        get generated() { return generated; },
+        io: {
+          readFile: (p: string) => files.get(p) ?? null,
+          writeFile: (p: string, c: string) => { files.set(p, c); },
+          generate: () => { generated++; return `gen${generated}`.padEnd(64, 'x'); },
+        },
+      };
+    }
+
+    it('env 里有像样的 PSK → 直接用，一个字节都不生成', () => {
+      const f = fake();
+      const r = resolvePsk({ envPsk: 'e'.repeat(64), dataDir: '/data', ...f.io });
+      expect(r.source).toBe('env');
+      expect(r.psk).toBe('e'.repeat(64));
+      expect(f.generated).toBe(0);
+      expect(f.files.size).toBe(0);
+    });
+
+    it('env 缺失 → 生成一把 ≥32 的强随机 PSK 并落盘', () => {
+      const f = fake();
+      const r = resolvePsk({ dataDir: '/data', ...f.io });
+      expect(r.source).toBe('generated');
+      expect(r.psk.length).toBeGreaterThanOrEqual(MIN_PSK_LENGTH);
+      expect(r.path).toBe('/data/' + GENERATED_PSK_FILENAME);
+      expect(f.files.get(r.path)).toBe(r.psk);
+    });
+
+    it('env 显式设成那个公开默认值 → 按没设处理（它本来就等于公开）', () => {
+      const f = fake();
+      const r = resolvePsk({ envPsk: DEFAULT_INSECURE_PSK, dataDir: '/data', ...f.io });
+      expect(r.source).toBe('generated');
+      expect(r.psk).not.toBe(DEFAULT_INSECURE_PSK);
+    });
+
+    it('重启后复用上次生成的那把 —— 不换 PSK，隧道不会被自己的重启打断', () => {
+      const f = fake();
+      const first = resolvePsk({ dataDir: '/data', ...f.io });
+      const second = resolvePsk({ dataDir: '/data', ...f.io });
+      expect(second.source).toBe('persisted');
+      expect(second.psk).toBe(first.psk);
+      expect(f.generated, '只该生成过一次').toBe(1);
+    });
+
+    it('落盘的值短于下限 → 当作没有，重新生成（宁可换掉也别留一把弱钥匙）', () => {
+      const f = fake();
+      f.files.set('/data/' + GENERATED_PSK_FILENAME, 'tooshort');
+      const r = resolvePsk({ dataDir: '/data', ...f.io });
+      expect(r.source).toBe('generated');
+      expect(r.psk.length).toBeGreaterThanOrEqual(MIN_PSK_LENGTH);
+    });
+
+    it('真生成器：64 个 hex 字符，两次不同', () => {
+      const a = generatePsk();
+      expect(a).toMatch(/^[0-9a-f]{64}$/);
+      expect(a.length).toBeGreaterThanOrEqual(MIN_PSK_LENGTH);
+      expect(generatePsk()).not.toBe(a);
+    });
   });
 
   it('isValidAuthority：host / host:port 合法，默认端口与编码形态拒绝', () => {
