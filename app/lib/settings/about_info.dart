@@ -12,7 +12,7 @@
 ///
 /// 这里**不**引 `package_info_plus` 去运行时读包信息：那要进依赖白名单，而本 App
 /// 是自部署自签名的调试工具，版本一致性用一条守门钉住就够了，不必为它多一个依赖。
-const String kAppVersion = '1.0.1';
+const String kAppVersion = '0.0.1';
 
 /// 隧道协议版本。`docs/protocol.md`「Data plane (`v: 1`)」与
 /// `server/src/index.ts` 的 `v: 1 as const` 共同钉死；PRD §7.3 要求 App

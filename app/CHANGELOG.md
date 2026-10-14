@@ -5,25 +5,59 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [1.0.1] — 2026-10-14
+## [0.0.1] — 2026-10-14
 
-Fixes for the two defects that made v1.0.0 unusable in the field.
+首个公开发布的版本。**beta：功能尚未完整，接口与行为都可能变**，不承诺
+semver 的兼容性保证（旧版本号 0.1.0 从未发布过，一并折进这一版）。
+
+### Added
+
+- **Pairing** — QR scan or signed-link paste; verify-before-store; TOFU
+  certificate pinning with per-machine pin persistence; automatic credential
+  renewal inside the T-2h window (`SessionScheduler`).
+- **Conversations (屏 E)** — journal-backed bubble list, assistant streaming
+  frames (revision-checked), tool-call nodes, composer with read-only mode
+  for one-shot subagents.
+- **Approvals & questions (屏 P)** — `approval/request` and
+  `user-questions/request` waterfalls rendered as interactive cards; answers
+  posted back over `$events/result` with the bare business payload.
+- **Sessions (屏 M)** — the machine's session list over `session/list`,
+  searchable metadata, archive/pin metadata surface.
+- **Models & reasoning effort (屏 K)** — engine's own catalog via
+  `session/modelCatalog`, per-session selection with
+  "follow deployment default" semantics (no flag on the wire).
+- **Context ring (屏 L)** — live context pressure, token usage, cache hit
+  rate, honest-absent rendering when the engine has not reported usage.
+- **Subagent teams (屏 N)** — read-only child catalog and child conversations
+  (one-shot children are terminal by protocol, not by flag).
+- **Jobs & host (屏 F)** — five-state job lifecycle collapsed to three cards;
+  host panel with session count and plugin inventory (host metrics do not
+  exist in `0.1.7-rc.2` and are declared as such instead of fabricated).
+- **Lock screen** — biometric gate over the credential store.
+- **Landscape** — portrait and landscape both supported and pinned by layout
+  tests (`2400×1080` viewport, keyboard-inset cases).
+- **Resilience** — mux carrier loss no longer strands logical streams
+  (intent-set replay on reconnect); `$events` re-opened periodically to
+  defeat a deaf long-lived carrier; unary RPCs carry a 35 s client ceiling
+  surfacing `client/timeout` as a retryable error card.
+- **Console continuity** — opening the console continues the machine's most
+  recently updated session instead of forcing a new one.
 
 ### Fixed
 
-- **release 包完全没有网络权限**（D-114）—— `INTERNET`（以及扫码配对要的
-  `CAMERA`）只声明在 `src/debug` 与 `src/profile` 的 manifest 里，main（= release）
-  没有。症状：release 包装得上、启动不崩、签名也对，但配对 / 控制台 / 更新检查一律
-  `SocketException: Permission denied`。**只在 release 出现**——debug 包永远连得上，
-  所以任何在 debug 上的验证（包括「启动没崩」「能装上」「签名正确」）都发现不了它。
-- **更新检查拼错仓库路径**（D-114）—— `kSourceRepository` 是 `dsh-remote-relay`
-  （只有仓库名、没有 owner），拼出 `/repos/dsh-remote-relay/...` ⇒ 404 ⇒「检查更新
-  失败」。那条常量的注释还写着「remote 指向内网 Gitea」——那是过期信息，remote
-  早就是 `github.com:T0x7/...`。**一条注释过期、代码照着它写错，比没有注释更糟。**
-  首次写的守门方向也错了（只断言「不是完整 URL」，没断言「是不是 owner/repo」），
-  于是照样放行；已改成指向真实失败形态。
-
-## [1.0.0] — 2026-10-14
+- TOFU pin had readers but no writer: the pairing-time fingerprint was
+  dropped, so the console, machine detail and renewal scheduler all built
+  empty pin tables and were rejected by their own fail-closed TLS gate.
+- Pairing sheet occluded by the IME: the inset padding read the page's
+  `MediaQuery` instead of the sheet's, freezing the keyboard inset at sheet
+  build time and pushing 解析链接 off-screen (fixed and regression-tested,
+  portrait and landscape).
+- A lost mux carrier permanently ended every logical stream (journal and
+  `$events` never recovered); carrier loss now detaches and replays.
+- The `4001` device-replaced close code was never read, so the immediate
+  heal path was dead and every eviction degraded to exponential backoff.
+- Unary engine RPCs had no client-side ceiling; a stalled tunnel spun the UI
+  forever with no retry affordance.
 
 First shippable build: the diagnostic stack, credential lifecycle and console
 recovery paths are all real and machine-verified (see `docs/app-field-notes.md`
@@ -144,55 +178,18 @@ recovery paths are all real and machine-verified (see `docs/app-field-notes.md`
   host pane shows bundles (16) instead of 199 loader entries.
 - Error cards abbreviate the account home directory to `~`.
 
-## [0.1.0] — 2026-10-03
-
-First internal milestone (M2 complete, engine `0.1.7-rc.2`).
-
-### Added
-
-- **Pairing** — QR scan or signed-link paste; verify-before-store; TOFU
-  certificate pinning with per-machine pin persistence; automatic credential
-  renewal inside the T-2h window (`SessionScheduler`).
-- **Conversations (屏 E)** — journal-backed bubble list, assistant streaming
-  frames (revision-checked), tool-call nodes, composer with read-only mode
-  for one-shot subagents.
-- **Approvals & questions (屏 P)** — `approval/request` and
-  `user-questions/request` waterfalls rendered as interactive cards; answers
-  posted back over `$events/result` with the bare business payload.
-- **Sessions (屏 M)** — the machine's session list over `session/list`,
-  searchable metadata, archive/pin metadata surface.
-- **Models & reasoning effort (屏 K)** — engine's own catalog via
-  `session/modelCatalog`, per-session selection with
-  "follow deployment default" semantics (no flag on the wire).
-- **Context ring (屏 L)** — live context pressure, token usage, cache hit
-  rate, honest-absent rendering when the engine has not reported usage.
-- **Subagent teams (屏 N)** — read-only child catalog and child conversations
-  (one-shot children are terminal by protocol, not by flag).
-- **Jobs & host (屏 F)** — five-state job lifecycle collapsed to three cards;
-  host panel with session count and plugin inventory (host metrics do not
-  exist in `0.1.7-rc.2` and are declared as such instead of fabricated).
-- **Lock screen** — biometric gate over the credential store.
-- **Landscape** — portrait and landscape both supported and pinned by layout
-  tests (`2400×1080` viewport, keyboard-inset cases).
-- **Resilience** — mux carrier loss no longer strands logical streams
-  (intent-set replay on reconnect); `$events` re-opened periodically to
-  defeat a deaf long-lived carrier; unary RPCs carry a 35 s client ceiling
-  surfacing `client/timeout` as a retryable error card.
-- **Console continuity** — opening the console continues the machine's most
-  recently updated session instead of forcing a new one.
+Fixes for the two defects that made v1.0.0 unusable in the field.
 
 ### Fixed
 
-- TOFU pin had readers but no writer: the pairing-time fingerprint was
-  dropped, so the console, machine detail and renewal scheduler all built
-  empty pin tables and were rejected by their own fail-closed TLS gate.
-- Pairing sheet occluded by the IME: the inset padding read the page's
-  `MediaQuery` instead of the sheet's, freezing the keyboard inset at sheet
-  build time and pushing 解析链接 off-screen (fixed and regression-tested,
-  portrait and landscape).
-- A lost mux carrier permanently ended every logical stream (journal and
-  `$events` never recovered); carrier loss now detaches and replays.
-- The `4001` device-replaced close code was never read, so the immediate
-  heal path was dead and every eviction degraded to exponential backoff.
-- Unary engine RPCs had no client-side ceiling; a stalled tunnel spun the UI
-  forever with no retry affordance.
+- **release 包完全没有网络权限**（D-114）—— `INTERNET`（以及扫码配对要的
+  `CAMERA`）只声明在 `src/debug` 与 `src/profile` 的 manifest 里，main（= release）
+  没有。症状：release 包装得上、启动不崩、签名也对，但配对 / 控制台 / 更新检查一律
+  `SocketException: Permission denied`。**只在 release 出现**——debug 包永远连得上，
+  所以任何在 debug 上的验证（包括「启动没崩」「能装上」「签名正确」）都发现不了它。
+- **更新检查拼错仓库路径**（D-114）—— `kSourceRepository` 是 `dsh-remote-relay`
+  （只有仓库名、没有 owner），拼出 `/repos/dsh-remote-relay/...` ⇒ 404 ⇒「检查更新
+  失败」。那条常量的注释还写着「remote 指向内网 Gitea」——那是过期信息，remote
+  早就是 `github.com:T0x7/...`。**一条注释过期、代码照着它写错，比没有注释更糟。**
+  首次写的守门方向也错了（只断言「不是完整 URL」，没断言「是不是 owner/repo」），
+  于是照样放行；已改成指向真实失败形态。

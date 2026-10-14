@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:dsh_remote_app/logging/app_log.dart';
 import 'package:dsh_remote_app/services/update_checker.dart';
+import 'package:dsh_remote_app/settings/about_info.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// D-114：更新检查。
@@ -65,10 +66,15 @@ void main() {
     });
 
     test('tag 比当前旧 → 不提示（哪怕它是 GitHub 的 latest）', () {
-      final c = UpdateCheck.fromReleaseJson(release('v0.9.0'));
+      // **不能写死一个版本号**：当前版本随发版变动，写死的"旧版本"某天会变成
+      // 比当前新（kAppVersion 降到 0.0.1 时，这条用例就是这么红的）。
+      // 正确做法是从当前版本**推导**出一个必定更旧的 tag。
+      final parts = kAppVersion.split('.');
+      final older = '${parts[0]}.${int.tryParse(parts[1])! - 1 < 0 ? 0 : int.tryParse(parts[1])! - 1}.0';
+      final c = UpdateCheck.fromReleaseJson(release('v$older'));
       expect(c.available, isFalse,
           reason: '发版顺序错了也不能把旧版当新版推');
-      expect(c.latest, '0.9.0');
+      expect(c.latest, older);
     });
 
     test('缺 tag_name → 失败而不是崩', () {
