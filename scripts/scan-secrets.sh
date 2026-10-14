@@ -206,6 +206,10 @@ report "possible credential committed" \
   '(psk|passwd|password|secret|token|api[_-]?key|webhook)["'"'"']?[ 	]*[:=][ 	]*["'"'"']?[A-Za-z0-9+/=_-]{24,}'
 
 # 5. Absolute home paths — a username is PII even when the host is masked.
+#    `/root` is in the set for the same reason `/Users` and `/home` are: a
+#    deployment directory published under root names both the host's layout and
+#    the project that lives there, and it sat in this repo's own docs for a
+#    release because only the macOS and Linux-desktop spellings were covered.
 #    The pattern spans the whole leading path segment, not just its first
 #    character: SAFE allowlists the full `/Users/someone`, so a one-letter match
 #    could never be recognised as the placeholder it is (trap 5) and every
@@ -215,18 +219,38 @@ report "possible credential committed" \
 #    rewrites it, and inventing a different-looking path would weaken that
 #    test. A test file is not a place a maintainer's real username appears.
 report "possible personal home path committed" \
-  '/(Users|home)/[a-zA-Z][a-zA-Z0-9._-]*' skip-tests
+  '/(Users|home|root)/[a-zA-Z][a-zA-Z0-9._-]*' skip-tests
 
 # 6. Commit messages. A real leak rode along in one: a long message was passed
 #    through a shell that spliced its whole environment into it, committing
 #    HOME, USER and the machine hostname. The tree scan above cannot see that.
+#
+#    Two things this rule needed to stop flagging things that are not leaks,
+#    without giving up what it catches:
+#
+#    a) The env-var alternative used to stop at the `=`, so the token handed to
+#       the allowlist was the literal string `HTTPS_PROXY=` — which matches
+#       nothing in SAFE, and made `HTTPS_PROXY=127.0.0.1:7897` indistinguishable
+#       from a spliced `HOME=/Users/<real name>`. Same defect as trap 5, one
+#       level up: the token has to span the whole thing the rule is about, or
+#       the allowlist is testing a fragment that carries no information. It now
+#       runs to the end of the value.
+#    b) It had no allowlist at all, which is the trap-4 shape again: strictly
+#       coarser than the tree rules above, so prose describing a leak tripped it
+#       (a commit explaining that loopback is allowlisted next to a hostname it
+#       had just removed). SAFE is applied per token here too.
 if [ "$SCAN_HISTORY" = "1" ]; then
+  MSG_RULE='^(HOME|LOGNAME|HOSTNAME|PATH|USER|BASH_ARGV|BASH_EXECUTION_STRING|HTTPS_PROXY|GIT_TEMPLATE_DIR)=[^[:space:]]*|/(Users|home|root)/[a-zA-Z][a-zA-Z0-9._-]*|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
   for c in $(git rev-list --all); do
     msg=$(git log -1 --format=%B "$c")
-    body=$(printf '%s' "$msg" | grep -nEi '^(HOME|LOGNAME|HOSTNAME|PATH|USER|BASH_ARGV|BASH_EXECUTION_STRING|HTTPS_PROXY|GIT_TEMPLATE_DIR)=|/(Users|home)/[a-zA-Z]|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' || true)
-    if [ -n "$body" ]; then
+    toks=$(printf '%s' "$msg" | grep -oiE "$MSG_RULE" 2>/dev/null)
+    unsafe=$(printf '%s\n' "$toks" | while IFS= read -r tok; do
+      [ -z "$tok" ] && continue
+      printf '%s' "$tok" | grep -qE "$SAFE" || printf '%s\n' "$tok"
+    done)
+    if [ -n "$unsafe" ]; then
       echo "::error::commit message ${c:0:8} carries environment or personal data"
-      printf '%s\n' "$body" | head -10
+      printf '%s\n' "$unsafe" | head -10
       rc=1
     fi
   done

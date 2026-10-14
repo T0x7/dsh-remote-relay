@@ -675,9 +675,9 @@ App 侧配套：
 **守门**：relay 5 条 + App 4 条，两端都做了回退即红（relay 摘口子 → 数据面那条变
 红；App 退回跳过 → 三条同时变红）。server 97/97，app 504/504。
 
-**生产部署与实测**（16:38）：relay 是 rsync 部署在 VPS 的生产容器
-（`a-production-container`，Up 8 天 healthy，`a-private-deploy-dir`，端口
-18080 / `network_mode: host`）。部署时**没有整体替换**——部署版源码是 9 月 30 日的，
+**生产部署与实测**（16:38）：relay 是 rsync 部署在自建中继 VPS 上的生产容器
+（已连续 healthy 运行 8 天，宿主部署目录不进版本库，`network_mode: host`）。部署时
+**没有整体替换**——部署版源码是 9 月 30 日的，
 与本地差 105 行，整体替换等于把两个月无关变更一起推进生产。只把 D-111 这三处改动
 打成补丁贴上去，本地拉下部署版整套 src 用同款 tsc 验过再上传；旧文件备份在
 `src/index.ts.bak-d111`。

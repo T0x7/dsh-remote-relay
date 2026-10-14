@@ -125,7 +125,69 @@ rm -f "/tmp/scan-cosmetic.$$" "/tmp/scan-safeline.$$" 2>/dev/null
 cleanup
 rm -f "/tmp/scan-out.$$" 2>/dev/null
 
-echo "6. clean tree must pass again"
+echo "6. a /root/ deployment path must be caught"
+# Not synthetic in spirit: the repo shipped two of these (the production
+# deploy directory under /root, in a progress log and a field-notes table)
+# through a release while rule 5 matched only /Users and /home. The macOS and
+# Linux-desktop spellings were covered; the one a VPS uses was not.
+printf '%s\n' \
+  '# TEMPORARY scanner self-test fixture — must never be committed.' \
+  'deploy dir: a-private-deploy-dir (rsync, no git)' > "$FIXTURE"
+git add "$FIXTURE" 2>/dev/null
+if bash "$SCAN" >/tmp/scan-root.$$ 2>&1; then
+  echo "   FAIL: scanner passed a /root/ deployment path" >&2
+  rc=1
+elif grep -q 'SCAN-SELFTEST.md' /tmp/scan-root.$$; then
+  echo "   ok — caught the /root/ path (the rule that missed the VPS spelling)"
+else
+  echo "   FAIL: scanner rejected the tree but not for the planted /root/ path" >&2
+  cat /tmp/scan-root.$$ >&2
+  rc=1
+fi
+cleanup
+rm -f "/tmp/scan-root.$$" 2>/dev/null
+
+echo "7. commit messages: placeholders and loopback pass, real paths do not"
+# Rule 6 needs commits to look at, and this self-test must not leave any
+# behind. A commit is minted with commit-tree (reusing HEAD's tree, so the
+# working tree is untouched) and parked on a scratch ref, because the rule
+# reads `git rev-list --all`. The ref is removed whatever happens; the objects
+# it pinned are unreferenced and gc collects them, which is the same residue
+# class as a dangling stash entry and far cheaper than a test-only branch.
+SCRATCH=refs/selftest/scan-secrets
+drop_scratch() { git update-ref -d "$SCRATCH" 2>/dev/null; return 0; }
+trap 'cleanup; drop_scratch' EXIT
+HEADTREE=$(git rev-parse HEAD^{tree})
+
+msg_case() {   # msg_case <expected: pass|fail> <commit message>
+  local want=$1 msg=$2 c
+  c=$(printf '%s' "$msg" | git commit-tree "$HEADTREE" 2>/dev/null) || return 1
+  git update-ref "$SCRATCH" "$c" 2>/dev/null || return 1
+  # Ask whether THIS commit was flagged, not whether the scan came back clean.
+  # The repository's own history may carry real findings — those are the
+  # guard's job, not this case's — and a case that inherits them cannot
+  # express "this message is fine".
+  bash "$SCAN" --history >/tmp/scan-msg.$$ 2>&1
+  if grep -q "commit message ${c:0:8} " /tmp/scan-msg.$$; then got=fail; else got=pass; fi
+  if [ "$got" = "$want" ]; then
+    echo "   ok — $want as expected"
+  else
+    echo "   FAIL: expected $want, got $got for: $msg" >&2
+    grep "commit message ${c:0:8} " /tmp/scan-msg.$$ | head -3 >&2
+    rc=1
+  fi
+  drop_scratch
+}
+
+msg_case pass 'engine at 127.0.0.1:3080, bridge 172.28.0.0/24, publish 0.0.0.0:8080
+sample path /Users/someone/proj'
+msg_case pass 'HTTPS_PROXY=127.0.0.1:7897 did not work either'
+msg_case fail 'deploy dir is a-private-deploy-dir, rsync, no git'
+msg_case fail 'HOME=/Users/jdoe leaked from the environment'
+rm -f "/tmp/scan-msg.$$" 2>/dev/null
+trap cleanup EXIT
+
+echo "8. clean tree must pass again"
 if bash "$SCAN" >/dev/null 2>&1; then
   echo "   ok"
 else

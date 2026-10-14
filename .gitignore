@@ -43,4 +43,3 @@ dist-local/
 
 # VPS 私钥——绝不入库
 *.pem
-.ssh-host.pem
