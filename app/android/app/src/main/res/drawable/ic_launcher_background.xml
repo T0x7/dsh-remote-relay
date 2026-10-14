@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive-icon background layer. Same vertical wash as the iOS icon master
+     (app/assets/icon/app-icon.svg): #141D22 falling to #0A0F12. The flat
+     @color/ic_launcher_background this replaces only existed for these two
+     adaptive-icon XMLs, so nothing else references it. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:type="linear"
+        android:angle="2700"
+        android:startColor="#141D22"
+        android:endColor="#0A0F12"/>
+</shape>

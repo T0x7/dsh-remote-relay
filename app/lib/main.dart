@@ -166,7 +166,7 @@ class _DshRemoteAppState extends State<DshRemoteApp> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'dsh remote',
+        title: 'DSH Remote',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
         darkTheme: AppTheme.dark(),

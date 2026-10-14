@@ -363,7 +363,7 @@ class L10nZh extends L10n {
   String get aboutNoOtaNote => '无 OTA、无自动更新：源码即产物，重新构建即升级。';
 
   @override
-  String get lockTitle => 'dsh remote 已锁定';
+  String get lockTitle => 'DSH Remote 已锁定';
 
   @override
   String get lockSub => '解锁后才会解密会话凭证';
@@ -1187,7 +1187,7 @@ class L10nZh extends L10n {
   String get diagnosticsCleared => '日志已清空';
 
   @override
-  String get diagnosticsShareSubject => 'dsh remote 诊断日志';
+  String get diagnosticsShareSubject => 'DSH Remote 诊断日志';
 
   @override
   String get authCauseExpired => '会话已过期';

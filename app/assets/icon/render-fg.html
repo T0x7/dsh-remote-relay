@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  html,body { margin:0; padding:0; background:#000000; }
+  svg { display:block; width:1024px; height:1024px; }
+</style></head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    Android ADAPTIVE ICON FOREGROUND — glyph only, no background.
+
+    Android renders adaptive icons on a 108dp canvas and may crop up to 18dp
+    off every edge, so only the inner 66dp square is guaranteed visible. This
+    layer is therefore the master artwork scaled by 0.82 (616 x 426 px, i.e.
+    inside the 626 px safe zone) about the canvas centre.
+
+    The background is a separate layer — see
+    android/app/src/main/res/drawable/ic_launcher_background.xml.
+  -->
+  <title>DSH Remote — adaptive icon foreground</title>
+  <defs>
+    <linearGradient id="stream" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2BB98A" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5EEAD4"/>
+      <stop offset="1" stop-color="#22A87B"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(512 512) scale(0.82) translate(-512 -512)">
+    <rect x="136" y="352" width="280" height="64" rx="32" fill="url(#stream)" opacity="0.55"/>
+    <rect x="136" y="480" width="280" height="64" rx="32" fill="url(#stream)"/>
+    <rect x="136" y="608" width="280" height="64" rx="32" fill="url(#stream)" opacity="0.55"/>
+    <rect x="488" y="292" width="360" height="440" rx="76" fill="none" stroke="url(#edge)" stroke-width="80"/>
+    <rect x="600" y="640" width="136" height="40" rx="20" fill="#34D399"/>
+  </g>
+</svg>
+
+</body></html>

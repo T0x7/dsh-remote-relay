@@ -760,7 +760,7 @@ abstract class L10n {
   /// No description provided for @lockTitle.
   ///
   /// In en, this message translates to:
-  /// **'dsh remote is locked'**
+  /// **'DSH Remote is locked'**
   String get lockTitle;
 
   /// No description provided for @lockSub.
@@ -2278,7 +2278,7 @@ abstract class L10n {
   /// No description provided for @diagnosticsShareSubject.
   ///
   /// In en, this message translates to:
-  /// **'dsh remote diagnostics log'**
+  /// **'DSH Remote diagnostics log'**
   String get diagnosticsShareSubject;
 
   /// No description provided for @authCauseExpired.

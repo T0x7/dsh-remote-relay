@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    DSH Remote — app icon master (vector).
+
+    Concept: three session streams flowing into the device in your hand.
+    Full-bleed square on purpose — iOS and Android both apply their own mask,
+    so no corner rounding belongs here.
+
+    Palette is the in-app theme: bg #0E1316 family, accent emerald #34D399.
+
+    Artwork bounds: x 136..888, y 252..772 (752 x 520), optically centred on
+    (512, 512). Kept inside the central 66dp safe zone once scaled — see
+    app-icon-foreground.svg for the Android adaptive layer.
+  -->
+  <title>DSH Remote — app icon</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#141D22"/>
+      <stop offset="1" stop-color="#0A0F12"/>
+    </linearGradient>
+    <linearGradient id="stream" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2BB98A" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5EEAD4"/>
+      <stop offset="1" stop-color="#22A87B"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <!-- streams: the machine's sessions, arriving -->
+  <rect x="136" y="352" width="280" height="64" rx="32" fill="url(#stream)" opacity="0.55"/>
+  <rect x="136" y="480" width="280" height="64" rx="32" fill="url(#stream)"/>
+  <rect x="136" y="608" width="280" height="64" rx="32" fill="url(#stream)" opacity="0.55"/>
+
+  <!-- the device -->
+  <rect x="488" y="292" width="360" height="440" rx="76" fill="none" stroke="url(#edge)" stroke-width="80"/>
+  <rect x="600" y="640" width="136" height="40" rx="20" fill="#34D399"/>
+</svg>

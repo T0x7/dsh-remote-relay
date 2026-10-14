@@ -31,6 +31,24 @@ control** in your pocket.
   unsupported) are each covered by tests, and the Settings toggle renders this
   device's real biometric capability rather than a hardcoded placeholder.
 
+## App icon & name
+
+The launcher icon is drawn once as SVG and cut to every platform size by
+script — never edit the PNGs by hand:
+
+- `assets/icon/app-icon.svg` — the master artwork ("session streams flowing
+  into the device in your hand").
+- `assets/icon/app-icon-foreground.svg` — the Android adaptive-icon foreground
+  (glyph only, pre-scaled into the 66/108 safe zone).
+- `assets/icon/render_masters.py` + headless Chrome produce the 2048px
+  masters; `assets/icon/generate_icons.py` cuts all 31 PNGs (iOS 15,
+  Android 5 densities × 3, Play Store 512).
+
+The display name is **DSH Remote** — set in `android:label`,
+`CFBundleDisplayName`, and the in-app `MaterialApp.title` / l10n strings.
+PNG outputs are exempted from the repo-wide `*.png` ignore rule because they
+are build inputs; a fresh clone without them has no icon at all.
+
 ## Security model
 
 - **TOFU certificate pinning** — the relay's certificate is pinned at pairing

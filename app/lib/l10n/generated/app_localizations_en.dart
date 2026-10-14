@@ -386,7 +386,7 @@ class L10nEn extends L10n {
       'No OTA and no self-update: the source is the artifact — rebuild to upgrade.';
 
   @override
-  String get lockTitle => 'dsh remote is locked';
+  String get lockTitle => 'DSH Remote is locked';
 
   @override
   String get lockSub => 'Session credentials decrypt only after unlock';
@@ -1253,7 +1253,7 @@ class L10nEn extends L10n {
   String get diagnosticsCleared => 'Log cleared';
 
   @override
-  String get diagnosticsShareSubject => 'dsh remote diagnostics log';
+  String get diagnosticsShareSubject => 'DSH Remote diagnostics log';
 
   @override
   String get authCauseExpired => 'Session expired';

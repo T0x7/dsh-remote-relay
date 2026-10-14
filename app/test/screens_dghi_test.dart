@@ -191,7 +191,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('dsh remote 已锁定'), findsOneWidget);
+      expect(find.text('DSH Remote 已锁定'), findsOneWidget);
       expect(find.text('这台设备没有可用的生物识别'), findsOneWidget);
       await tester.tap(find.text('解锁'));
       await tester.pumpAndSettle();
