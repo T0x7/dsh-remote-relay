@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  D-113：备份/设备迁移的逐项拒绝清单。
+
+  design §8 隐私表写着凭证「不随备份出设备」，但此前 main manifest **没有声明**
+  android:allowBackup=false —— 靠的是「日志落在 cache 目录，cache 不进备份」
+  这个间接事实。间接事实有两个问题：① 密钥（flutter_secure_storage 的
+  AndroidX security-crypto 偏好）默认**是**会被备份的；② Android 12+ 的
+  行为由 dataExtractionRules 决定，光写 allowBackup 不够。
+
+  这里把两件事都写成硬保证：allowBackup=false 关掉云备份与 adb 备份，
+  这份 rules 再挡住 Android 13+ 的「设备到设备迁移」——那台手机上的凭证
+  不该跟着换机流程跑到另一台设备上。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="file" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="file" />
+    </device-transfer>
+</data-extraction-rules>
