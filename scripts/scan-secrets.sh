@@ -12,7 +12,7 @@
 # protect. A real leak was in fact committed to a commit message while this
 # check existed, so it now covers commit messages too (--scan-history).
 #
-# THREE TRAPS, all hit while writing it. Read before changing any pattern:
+# FOUR TRAPS, all hit while writing it. Read before changing any pattern:
 #
 #  1. This runs through `git grep -E`, which is POSIX ERE. There is no \b and
 #     no \s. System grep accepts them, so a pattern that looks right in a
@@ -28,6 +28,28 @@
 #     allowlist exempts all of its contents — an allowlist entry for `.md`
 #     exempts every line in every markdown file. So the allowlist is applied
 #     to the content only, with the location prefix stripped first.
+#
+#  4. Trap 3 one level down, and it is the one that let a real relay hostname
+#     sit in this repo's own progress log while the guard ran green: the
+#     allowlist was still tested against the WHOLE LINE, so a single safe
+#     token anywhere on a line exempted every other match on it. The log line
+#     `127.0.0.1:3080, trusted-host relay.<private>.top` matched `127.0.0.1`
+#     and the real hostname went out with it. An allowlist must be tested at
+#     the same granularity as the detection, never coarser — so SAFE is now
+#     applied to each match the rule produced, and the line is reported if any
+#     one of them is not allowlisted.
+#
+#  5. Trap 4's own first draft kept the match narrower than the allowlist and
+#     so flagged every placeholder: rule 5 matched a single character after the
+#     username directory while SAFE allowlists the whole `/Users/someone`. And
+#     the token extraction dropped the `-i` the main pass runs with, so an
+#     UPPERCASE match such as `PSK=` extracted as the empty string and was then
+#     reported as "nothing vouched for this line" — a false positive wearing the
+#     costume of the new failure mode. Both halves of the pattern must be
+#     identical to the rule's, or the guard invents leaks instead of finding
+#     them. (Note the consequence for prose: this file's own comments are
+#     scanned like any other, so a truncated sample like the one that caused
+#     trap 5 is itself reported — reword rather than widen an exemption.)
 #
 # Every rule below is verified end-to-end against a planted leak; see
 # scripts/scan-secrets.selftest.sh. Re-run that after touching a pattern.
@@ -70,7 +92,7 @@ fi
 # guard is permanently red, and the first person to see that learns to ignore
 # it. Do not "tidy" it away; if you need another placeholder, use one that is
 # clearly fake and add it here next to this one.
-SAFE='example\.(com|org|net)|\.test([^a-z]|$)|\.invalid([^a-z]|$)|\.example([^a-z]|$)|localhost|127\.0\.0\.1|0\.0\.0\.0|255\.255\.255|8\.8\.8\.8|9\.9\.9\.9|1\.1\.1\.1|host\.docker\.internal|icanhazip\.com|ipify\.org|api\.ip\.sb|docker\.io|maven\.apache\.org|dsh-host-app\.app|session\.page|keepachangelog\.com|contributor-covenant\.org|github\.com|githubusercontent\.com|flutter\.dev|dart\.dev|pub\.dev|npmjs\.com|nodejs\.org|anthropic\.com|openai\.com|developer\.android\.com|apple\.developer\.com|schemas\.android\.com|schemas\.googleapis\.com|w3\.org|pub\.flutter-io\.cn|storage\.flutter-io\.cn|fonts\.googleapis\.com|fonts\.gstatic\.com|services\.gradle\.org|storage\.googleapis\.com|maven\.aliyun\.com|mirrors\.cloud\.tencent\.com|apple\.com|dl\.google\.com|maven\.google\.com|repo1\.maven\.org|plugins\.gradle\.org|dsh-remote-relay-default-insecure-psk|(^|[^0-9A-Za-z.])(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}|192\.0\.2\.[0-9]{1,3}|198\.51\.100\.[0-9]{1,3}|203\.0\.113\.[0-9]{1,3})([^0-9]|$)|/(Users|home)/someone([^a-zA-Z0-9-]|$)'
+SAFE='example\.(com|org|net)|\.test([^a-z]|$)|\.invalid([^a-z]|$)|\.example([^a-z]|$)|localhost|127\.0\.0\.1|0\.0\.0\.0|255\.255\.255|8\.8\.8\.8|9\.9\.9\.9|1\.1\.1\.1|host\.docker\.internal|icanhazip\.com|ipify\.org|api\.ip\.sb|docker\.io|maven\.apache\.org|dsh-host-app\.app|session\.page|keepachangelog\.com|contributor-covenant\.org|github\.com|githubusercontent\.com|flutter\.dev|dart\.dev|pub\.dev|npmjs\.com|nodejs\.org|anthropic\.com|openai\.com|developer\.android\.com|apple\.developer\.com|schemas\.android\.com|schemas\.googleapis\.com|w3\.org|pub\.flutter-io\.cn|storage\.flutter-io\.cn|fonts\.googleapis\.com|fonts\.gstatic\.com|services\.gradle\.org|storage\.googleapis\.com|maven\.aliyun\.com|mirrors\.cloud\.tencent\.com|apple\.com|dl\.google\.com|maven\.google\.com|repo1\.maven\.org|plugins\.gradle\.org|dsh-remote-relay-default-insecure-psk|local-smoke-psk-not-for-production|(^|[^0-9A-Za-z.])(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}|192\.0\.2\.[0-9]{1,3}|198\.51\.100\.[0-9]{1,3}|203\.0\.113\.[0-9]{1,3})([^0-9]|$)|/(Users|home)/someone([^a-zA-Z0-9-]|$)'
 
 # The guard's own fixture file, exempted by exact path. This is deliberate and
 # narrow: scan-secrets.selftest.sh exists to carry fake leaks, so its contents
@@ -89,7 +111,7 @@ rc=0
 # silently yields nothing — which reads as "no leaks found". This guard is
 # rewritten to fail closed instead of failing open.
 scan_into() {   # sets the global SCAN_HITS, and rc=2 if the mechanism broke
-  local out st line content set=("$@")
+  local out st line content toks unsafe set=("$@")
   SCAN_HITS=''
   out=$(git grep -niE "${set[0]}" -- "${set[@]:1}" 2>/dev/null)
   st=$?
@@ -108,10 +130,20 @@ scan_into() {   # sets the global SCAN_HITS, and rc=2 if the mechanism broke
     if [ "${line#"$FIXTURE_FILE":}" != "$line" ]; then continue; fi
     content=${line#*:}      # drop the path
     content=${content#*:}   # drop the line number
-    if printf '%s' "$content" | grep -qE "$SAFE"; then
-      continue
+    # Trap 4: allowlist each MATCH, not the line. `toks` is what this rule
+    # actually flagged on this line; SAFE is tested against those one at a
+    # time, so a loopback address sharing the line cannot vouch for a hostname
+    # it happens to sit next to. No tokens means grep -o disagreed with the
+    # -n pass, which leaves nothing to vouch for the line — treat it as unsafe
+    # rather than silently dropping it.
+    toks=$(printf '%s' "$content" | grep -oiE "${set[0]}" 2>/dev/null)
+    unsafe=$(printf '%s\n' "$toks" | while IFS= read -r tok; do
+      [ -z "$tok" ] && continue
+      printf '%s' "$tok" | grep -qE "$SAFE" || printf '%s\n' "$tok"
+    done)
+    if [ -z "$toks" ] || [ -n "$unsafe" ]; then
+      printf '%s\n' "$line"
     fi
-    printf '%s\n' "$line"
   done)
 }
 
@@ -174,12 +206,16 @@ report "possible credential committed" \
   '(psk|passwd|password|secret|token|api[_-]?key|webhook)["'"'"']?[ 	]*[:=][ 	]*["'"'"']?[A-Za-z0-9+/=_-]{24,}'
 
 # 5. Absolute home paths — a username is PII even when the host is masked.
+#    The pattern spans the whole leading path segment, not just its first
+#    character: SAFE allowlists the full `/Users/someone`, so a one-letter match
+#    could never be recognised as the placeholder it is (trap 5) and every
+#    redaction sample in the tree would read as a leak.
 #    Test files are exempt **by path**: they must carry a realistic
 #    `/Users/<name>/…` sample to prove the app's own redaction actually
 #    rewrites it, and inventing a different-looking path would weaken that
 #    test. A test file is not a place a maintainer's real username appears.
 report "possible personal home path committed" \
-  '/(Users|home)/[a-zA-Z]' skip-tests
+  '/(Users|home)/[a-zA-Z][a-zA-Z0-9._-]*' skip-tests
 
 # 6. Commit messages. A real leak rode along in one: a long message was passed
 #    through a shell that spliced its whole environment into it, committing

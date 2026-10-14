@@ -82,10 +82,50 @@ else
   rc=1
 fi
 
+echo "4. a safe token must NOT vouch for a leak beside it"
+# This is the real regression, not a synthetic one. The guard used to allowlist
+# the whole line, so `127.0.0.1` on a line exempted the private hostname sitting
+# next to it — which is exactly how a relay hostname sat in the project's own
+# progress log while every scan came back clean. An allowlist coarser than the
+# detection cannot catch anything: the safe token is always available to hide
+# behind. Planted as a separate fixture so the earlier planted-leak assertions
+# keep their own corpus.
+printf '%s\n' \
+  '# TEMPORARY scanner self-test fixture — must never be committed.' \
+  'engine at `127.0.0.1:3080`, trusted-host `relay.my-private-domain.top`' > "$FIXTURE"
+git add "$FIXTURE" 2>/dev/null
+
+if bash "$SCAN" >/tmp/scan-cosmetic.$$ 2>&1; then
+  echo "   FAIL: a loopback address on the line vouched for the hostname beside it" >&2
+  rc=1
+elif grep -qE 'my-private-domain' /tmp/scan-cosmetic.$$; then
+  echo "   ok — caught the hostname even though its line also held 127.0.0.1"
+else
+  echo "   FAIL: scanner rejected the tree but not for the leak it planted" >&2
+  cat /tmp/scan-cosmetic.$$ >&2
+  rc=1
+fi
+
+# ...and the inverse must stay true, or the tightening above turns into noise:
+# a line whose ONLY match is safe must still pass.
+echo "5. an all-safe line must still pass"
+printf '%s\n' \
+  '# TEMPORARY scanner self-test fixture — must never be committed.' \
+  'engine at `127.0.0.1:3080`, docs at `example.com`' > "$FIXTURE"
+git add "$FIXTURE" 2>/dev/null
+if bash "$SCAN" >/tmp/scan-safeline.$$ 2>&1; then
+  echo "   ok — an all-safe line still passes (no false positive from the tightening)"
+else
+  echo "   FAIL: a line of nothing but allowlisted tokens was reported" >&2
+  cat /tmp/scan-safeline.$$ >&2
+  rc=1
+fi
+rm -f "/tmp/scan-cosmetic.$$" "/tmp/scan-safeline.$$" 2>/dev/null
+
 cleanup
 rm -f "/tmp/scan-out.$$" 2>/dev/null
 
-echo "4. clean tree must pass again"
+echo "6. clean tree must pass again"
 if bash "$SCAN" >/dev/null 2>&1; then
   echo "   ok"
 else

@@ -24,7 +24,18 @@ try {
 } catch {
   PRIMITIVES_LIB = undefined
 }
-const VENDOR_TREE = '/Users/someone/Container/agent-stock/apps/agent-stock-desktop/dist/mac-arm64/AgentStock.app/Contents/Resources/engine/vendor/deepseek-harness'
+// Where the engine's packaged vendor tree lives.
+//
+// This was a literal `/Users/<name>/Container/…` path, which put a real
+// username and a private sibling checkout's layout into a public repository.
+// `DSH_VENDOR_TREE` now takes precedence; the fallback resolves the sibling
+// checkout relative to this repo instead of hardcoding a home directory, so it
+// works with no setup on a machine that has one and is simply absent on a
+// machine that does not — in which case the render spec skips itself, exactly
+// as it does in CI, which has no vendor tree either.
+const SIBLING = new URL('../../', import.meta.url).pathname
+const VENDOR_TREE = process.env.DSH_VENDOR_TREE
+  ?? SIBLING + 'agent-stock/apps/agent-stock-desktop/dist/mac-arm64/AgentStock.app/Contents/Resources/engine/vendor/deepseek-harness'
 const VENDOR_PRIMITIVES = VENDOR_TREE + '/packages/client/ui-primitives'
 // The vendor build resolves react against ITS OWN node_modules; the spec's
 // react-dom resolves against the plugin's. Two React copies = "invalid hook
