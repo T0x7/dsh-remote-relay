@@ -10,7 +10,14 @@
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMP=$(mktemp -d /tmp/dsh-relay-e2e2.XXXXXX)
 OUT=$TMP/result.txt
-PSK="e2e-stub-psk-$RANDOM"
+# The relay refuses to boot on a PSK below MIN_PSK_LENGTH (32). This value was
+# "e2e-stub-psk-$RANDOM" — 14 to 18 chars, so it has always been under the
+# floor. It passed on a developer's machine only because a `server/dist` built
+# before the guard tightened was still on disk and `resolvePsk` used to replace
+# a short value with a generated one; rebuild the server and it fails, which is
+# what CI does every run. Random hex rather than $RANDOM so the length does not
+# depend on how many digits the shell happened to produce.
+PSK="e2e-stub-psk-$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
 cleanup() { pkill -P $$ 2>/dev/null; lsof -ti :8083 -ti :9998 2>/dev/null | xargs kill 2>/dev/null; }
 trap cleanup EXIT
 
