@@ -47,6 +47,7 @@ class ConsolePage extends StatefulWidget {
     this.titleCache,
     this.lastSession,
     this.onShowMachines,
+    this.liveScope,
   });
 
   final MachinesStore store;
@@ -65,6 +66,11 @@ class ConsolePage extends StatefulWidget {
   /// 那里才有重新配对的流程（design §7.2：会话失效属 L1，唯一主行动）。
   /// null = 没有出路（测试与没接 AppRoot 的调用方），此时横幅仍然不谎称重连。
   final VoidCallback? onShowMachines;
+
+  /// D-112: claim/release 用的 scope。null = 进程级的 [LiveMachineScope.instance]
+  /// （生产）。测试可以传一个私有 scope，这样「切机器后旧机器重新被轮询器看到」
+  /// 能被断言，而不会去动那个进程级单例——同 [gatewayFactory] 的理由。
+  final LiveMachineScope? liveScope;
 
   @override
   State<ConsolePage> createState() => _ConsolePageState();
@@ -119,9 +125,34 @@ class _ConsolePageState extends State<ConsolePage> {
   void dispose() {
     widget.store.machines.removeListener(_onMachines);
     _muxStateSub?.cancel();
+    // D-112: 页面走了，它驾驶的那台机器就该回到轮询器的视野里。
+    _releaseClaim();
     _chat?.dispose();
     _disposeOwned();
     super.dispose();
+  }
+
+  /// D-112: 本页当前持有的 claim（机器 id）。只有一个 claim 在飞，于是
+  /// 「切机器先放旧的、再认新的」和「卸载时放掉当前的」都只能是这一份。
+  String? _claimedMachineId;
+
+  /// D-112: 认领一台机器。先放掉上一台——`LiveMachineScope` 的 claim 是**计数**
+  /// 而非布尔，所以「先 claim 新的再 release 旧的」会让旧机器永远差一次释放。
+  ///
+  /// 同一个 id 重复绑定是空操作（不重复计数）：调用点不必自己判断，规则留在这里。
+  void _claimMachine(String machineId) {
+    if (_claimedMachineId == machineId) return;
+    _releaseClaim();
+    _claimedMachineId = machineId;
+    (widget.liveScope ?? LiveMachineScope.instance).claim(machineId);
+  }
+
+  /// D-112: 放掉当前 claim。没认领过就是空操作。
+  void _releaseClaim() {
+    final claimed = _claimedMachineId;
+    if (claimed == null) return;
+    _claimedMachineId = null;
+    (widget.liveScope ?? LiveMachineScope.instance).release(claimed);
   }
 
   void _onMachines() {
@@ -133,6 +164,8 @@ class _ConsolePageState extends State<ConsolePage> {
     setState(() {
       if (next == null) {
         _machine = null;
+        // D-112: 没有下一台可驾驶 = 本页不再持有任何 claim。
+        _releaseClaim();
         _chat?.dispose();
         _chat = null;
         _disposeOwned();
@@ -161,7 +194,12 @@ class _ConsolePageState extends State<ConsolePage> {
     // D-051: tell the scope which machine the console is driving, so the
     // 60s poller leaves it alone (its carrier is the live source) instead of
     // asking the relay about a machine it already knows.
-    LiveMachineScope.instance.claim(entry.id);
+    //
+    // D-112: claim/release 严格成对，经 [_claimMachine] / [_releaseClaim] 这一个
+    // 漏斗。过去的版本只有 claim 没有 release，于是计数单调增长——切走的机器
+    // 被轮询器**永久**跳过，卡片一直停在上一次读到的「在线」，而一个已经没人
+    // 驾驶的机器本该回到 60 秒低频刷新里。
+    _claimMachine(entry.id);
     _machine = entry;
     _disposeOwned();
     final factory = widget.gatewayFactory;
@@ -681,6 +719,9 @@ class _ConsolePageState extends State<ConsolePage> {
                     gateway: chat.gateway,
                     sessionId: chat.sessionId,
                     subagentLabel: chat.subagentLabel,
+                    // D-112: 子代理补页要成对寻址，父半边只能来自 controller 的
+                    // 记忆。漏传 = 轨迹页自己拿 child 的 id 顶替 parent。
+                    parentSessionId: chat.parentSessionId,
                   ),
                 ),
             },

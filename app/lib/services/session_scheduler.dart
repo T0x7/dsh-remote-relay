@@ -32,6 +32,8 @@ class SessionScheduler {
   final Future<String?> Function(MachineEntry entry)? mintUrl;
 
   Timer? _timer;
+  bool _disposed = false;
+
   final renewing = ValueNotifier<Set<String>>({});
   final failures = ValueNotifier<Map<String, String>>({});
 
@@ -67,6 +69,11 @@ class SessionScheduler {
       renewing.value = {...renewing.value, entry.id};
       try {
         final url = await (mintUrl ?? _realMint)(entry);
+        // D-112: 铸钥匙要过一次网络往返，页面/应用完全可能在这段时间里被销毁。
+        // 同族的 [MachinesSessionPoller] 在同一个位置有同一道护栏（写作时发现
+        // 本文件少了它：写入已释放的 notifier 会抛，异常还会被下面的 catch
+        // 吞掉，于是「续期失败」被误记成网络故障）。
+        if (_disposed) return;
         if (url == null) {
           _recordFailure(entry, expired, 'mint returned nothing');
           continue;
@@ -88,7 +95,7 @@ class SessionScheduler {
       } on Object catch (e) {
         _recordFailure(entry, expired, '$e');
       } finally {
-        renewing.value = {...renewing.value}..remove(entry.id);
+        if (!_disposed) renewing.value = {...renewing.value}..remove(entry.id);
       }
     }
   }
@@ -134,6 +141,7 @@ class SessionScheduler {
   }
 
   void _fail(MachineEntry entry, String why) {
+    if (_disposed) return;
     // Failure is a chip state, not a modal (§7.2 L3): keep the old credential
     // (still valid until its own exp) and surface "renew failed".
     failures.value = {...failures.value, entry.id: why};
@@ -155,6 +163,7 @@ class SessionScheduler {
   }
 
   void dispose() {
+    _disposed = true;
     stop();
     renewing.dispose();
     failures.dispose();

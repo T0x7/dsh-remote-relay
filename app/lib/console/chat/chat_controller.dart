@@ -295,6 +295,41 @@ abstract final class ChatEventReader {
       DateTime.fromMillisecondsSinceEpoch(ms);
 }
 
+/// D-112: 会话的 wire 地址——**全仓唯一的构造规则**。
+///
+/// 子代理在 wire 上成对寻址（D-094）：引擎对缺 parent、或 parent 就等于 child
+/// 的地址一律回 `subagent/unauthorized`。规则只有三条：
+///
+/// 1. 不是子代理（[subagentLabel] 为 null）→ 普通地址；
+/// 2. 是子代理，parent 非空且不等于 child → 成对地址（[mode] 决定可不可写）；
+/// 3. 其余（parent 缺失/为空/等于 child）→ null，**不发**。
+///
+/// 过去 chat 与轨迹页各写各的，而两边都留了同一个兜底（把 child 自己的 id 填进
+/// 父半边）。三条路径——开 journal、手动重试/自动重开、轨迹补页——因此同时坏在
+/// 同一个地方。要让这类问题不可能再逃逸，就得让它们共用这一个判断，而不是各修
+/// 各的。
+///
+/// [mode] 是调用方自己的语义（chat 侧用会话的 mode，轨迹补页是读，恒为
+/// [SubagentMode.continuable]），规则本身不猜它。
+SessionAddress? addressForSession({
+  required String? sessionId,
+  required String? subagentLabel,
+  required String? parentSessionId,
+  SubagentMode mode = SubagentMode.continuable,
+}) {
+  if (sessionId == null) return null;
+  if (subagentLabel == null) return PlainSessionAddress(sessionId);
+  // 规则 3：凑不齐的配对（parent 缺失/为空/等于 child）不发地址——引擎对
+  // 这两种地址一律回 unauthorized，发了也只是把「明确失败」劣化成「空白页」。
+  final parent = parentSessionId;
+  if (parent == null || parent.isEmpty || parent == sessionId) return null;
+  return SubagentSessionAddress(
+    parentSessionId: parent,
+    childSessionId: sessionId,
+    mode: mode,
+  );
+}
+
 /// Drives one machine's console: the session journal, its live projections,
 /// and the approval / question waterfalls waiting for an answer.
 ///
@@ -593,30 +628,63 @@ class ChatController extends ChangeNotifier {
     // 的 null 分支 = 忘掉，用户显式关掉的就别在下次冷启动又被请回来。
     // 子代理会话也记：用户点进子代理看的就是它，冷启动回到子会话是合理的。
     unawaited(lastSession?.remember(machineId, sessionId) ?? Future<void>.value());
-    _openJournal(sessionId,
-        subagentLabel: subagentLabel,
-        parentSessionId: parentSessionId,
-        reason: 'open');
+    _openJournal(sessionId, reason: 'open');
   }
+
+  /// D-112: 这个会话没法在 wire 上寻址——**在本地就说清楚**，而不是发一个
+  /// 引擎必定拒绝的地址。
+  ///
+  /// 触发条件只有一个：调用方标了子代理却没给 parent（或 parent 就等于 child）。
+  /// 落到 [ErrorCode.engineUnknown] 是有意的：它是错误码表里给「App 没被教过
+  /// 的情况」留的兜底，而这一条的 retry 策略是 [RetryPolicy.none]——同一个缺口
+  /// 再点一次重试，构造出来的还是同一个地址，给一个永远失败的重试按钮比不给
+  /// 更糟（自动重开也因此不会武装，无限循环的老路自己就断了）。
+  void _failUnaddressable(String sessionId, String reason) {
+    _disarmFirstFrameDeadline();
+    _loading = false;
+    final appError = AppError(
+      ErrorCode.engineUnknown,
+      rawMessage: 'subagent/parent-missing',
+    );
+    _error = appError;
+    // D-095/D-100: 只有 ErrorNotice 气泡是真的会被渲染出来的那块面板。
+    _bubbles = [..._bubbles, ErrorNotice(appError)];
+    AppLog.w('chat',
+        'subagent session $sessionId has no addressable parent (reason=$reason)');
+    AppLog.audit('chat.journal.unaddressable', attrs: {
+      'session': sessionId,
+      'reason': reason,
+    });
+    notifyListeners();
+  }
+
+  /// D-112: 本控制器当前会话的 wire 地址（[addressForSession] + 当前记忆）。
+  ///
+  /// 「现在开着的是哪个子代理」只由 [_subagentLabel] / [_parentSessionId] 记忆，
+  /// [_openJournal] 不再接受调用方传参。传参式的写法每多一个调用点就多一次漏传
+  /// 的机会，而漏传的表现是**退化成普通会话**——真机上正是首帧超时后的自动重开与
+  /// 手动重试，子会话由此永久不可恢复。
+  ///
+  /// 返回 null = 这个会话**根本没法寻址**。过去这里兜底成
+  /// `parentSessionId ?? sessionId`，等于主动发一个注定被拒的地址；宁可让这次
+  /// open 明确失败（[ErrorNotice]）也不发。
+  SessionAddress? _addressFor(String sessionId) => addressForSession(
+        sessionId: sessionId,
+        subagentLabel: _subagentLabel,
+        parentSessionId: _parentSessionId,
+        mode: _readOnly,
+      );
 
   /// D-104: 同步打开 journal（[open] 与 [retry] 共用）。
   ///
-  /// 子代理在 wire 上成对寻址（D-094）：`SubagentSessionAddress` 缺 parent 引擎
-  /// 回 `subagent/unauthorized`，所以 parent 一律由调用方另传，兜底成 child
-  /// 自己只会得到一个空白的子会话页。
-  void _openJournal(
-    String sessionId, {
-    String? subagentLabel,
-    String? parentSessionId,
-    String reason = 'open',
-  }) {
-    final address = subagentLabel == null
-        ? PlainSessionAddress(sessionId)
-        : SubagentSessionAddress(
-            parentSessionId: parentSessionId ?? sessionId,
-            childSessionId: sessionId,
-            mode: _readOnly,
-          );
+  /// 地址一律走 [_addressFor]，调用点不参与决策——重试、自动重开、后台恢复三条
+  /// 路径因此不可能各带各的 parent 走偏。
+  void _openJournal(String sessionId, {String reason = 'open'}) {
+    final address = _addressFor(sessionId);
+    if (address == null) {
+      _failUnaddressable(sessionId, reason);
+      return;
+    }
     final gen = ++_journalGeneration;
     _journal = gateway.follow(address: address);
     AppLog.d('e2e', '[e2e] open journal addr=$address gen=$gen');
@@ -626,7 +694,10 @@ class ChatController extends ChangeNotifier {
       'session': sessionId,
       'gen': gen,
       'reason': reason,
-      'subagent': subagentLabel != null,
+      'subagent': _subagentLabel != null,
+      // D-112: parent 进日志，否则「引擎说 unauthorized」这件事在回溯时无法
+      // 区分是「App 发错了」还是「引擎那边的父子关系真的变了」。
+      'parent': _parentSessionId ?? '',
     });
     _journalSub = _journal!.frames.listen((f) {
       // 旧流（关闭动作是异步的）迟到的帧一律丢弃。
@@ -725,6 +796,11 @@ class ChatController extends ChangeNotifier {
 
   /// 打开中的会话是不是子代理（决定轨迹补页用哪种地址）。
   String? get subagentLabel => _subagentLabel;
+
+  /// D-112: 打开中的子代理会话的**父** id。轨迹补页要重建同一份成对地址，
+  /// 而补页发生在 controller 之外（pane 拿不到内部字段），所以这里是它唯一的
+  /// 入口。普通会话为 null。
+  String? get parentSessionId => _parentSessionId;
 
   /// Whether the composer accepts input.
   ///
@@ -1043,8 +1119,7 @@ class ChatController extends ChangeNotifier {
     _loading = true;
     _armFirstFrameDeadline(sessionId);
     _subscribeEvents();
-    _openJournal(sessionId,
-        reason: manual ? 'retry' : 'auto-reopen');
+    _openJournal(sessionId, reason: manual ? 'retry' : 'auto-reopen');
     AppLog.audit('chat.journal.reopen', attrs: {
       'session': sessionId,
       'manual': manual,

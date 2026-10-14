@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dsh_remote_app/data/machines_repository.dart';
 import 'package:dsh_remote_app/logging/app_log.dart';
 import 'package:dsh_remote_app/services/session_scheduler.dart';
@@ -208,5 +210,56 @@ void main() {
     expect(lines.any((l) => l.contains('action=machine.renew')
         && l.contains('ok=true')), isTrue,
         reason: '成功也要留痕：否则分不清「没触发」和「触发了但失败」');
+  });
+
+  // D-112：mint 要过一次网络往返，app 完全可能在这段时间里被销毁。同族的
+  // MachinesSessionPoller 在同样的位置有同一道护栏，本文件当时漏了，于是
+  // `dispose()` 之后的 `renewing.value = …` 抛「ValueNotifier was used after
+  // being disposed」——而那个异常又被自己的 catch 吞掉、再在 finally 里抛一次，
+  // 最终以「续期失败」的面貌出现，排障时被误读成网络故障。
+  group('D-112 · dispose 后不再写已释放的 notifier', () {
+    test('mint 在途时 dispose：sweep 安静收尾，不抛', () async {
+      final now = DateTime.utc(2026, 10, 1, 12);
+      final store = MachinesStore(repo: InMemoryMachinesRepository());
+      store.machines.value = [
+        machineFrom(mintTestUrl(now: now.subtract(const Duration(hours: 23)))),
+      ];
+      final renewed = mintTestUrl(now: now);
+      final inFlight = Completer<String?>();
+      final scheduler = SessionScheduler(
+        store: store,
+        now: () => now,
+        mintUrl: (_) => inFlight.future,
+      );
+
+      final sweep = scheduler.sweep();
+      scheduler.dispose();
+      inFlight.complete(renewed.toString());
+
+      await expectLater(sweep, completes,
+          reason: 'dispose 之后写 notifier 会抛，且抛点在自己的 catch 里——'
+              '用户看到的是「续期失败」，真相被吃掉了');
+    });
+
+    test('mint 失败时 dispose：也不抛', () async {
+      final now = DateTime.utc(2026, 10, 1, 12);
+      final store = MachinesStore(repo: InMemoryMachinesRepository());
+      store.machines.value = [
+        machineFrom(mintTestUrl(now: now.subtract(const Duration(hours: 23)))),
+      ];
+      final inFlight = Completer<String?>();
+      final scheduler = SessionScheduler(
+        store: store,
+        now: () => now,
+        mintUrl: (_) => inFlight.future,
+      );
+
+      final sweep = scheduler.sweep();
+      scheduler.dispose();
+      inFlight.completeError(StateError('relay down'));
+
+      await expectLater(sweep, completes,
+          reason: '_fail 写的是同一个已释放的 notifier（护栏与 poller 同位置同写法）');
+    });
   });
 }

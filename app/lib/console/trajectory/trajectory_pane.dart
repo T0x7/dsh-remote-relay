@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:dsh_remote_core/api/engine_gateway.dart';
 import 'package:dsh_remote_core/api/engine_models.dart';
+import 'package:dsh_remote_app/console/chat/chat_controller.dart';
 import 'package:dsh_remote_app/l10n/generated/app_localizations.dart';
 import 'package:dsh_remote_app/ui/theme.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +29,7 @@ class TrajectoryPane extends StatefulWidget {
     required this.gateway,
     required this.sessionId,
     required this.subagentLabel,
+    this.parentSessionId,
   });
 
   final TrajectoryLedger ledger;
@@ -36,8 +38,15 @@ class TrajectoryPane extends StatefulWidget {
   /// 引擎会话 id；null 表示还没打开会话。
   final String? sessionId;
 
-  /// 子代理会话的父 id。非 null 时补页要按子代理地址走。
+  /// 子代理会话的标签。非 null 表示 [sessionId] 是**子**会话的 id。
   final String? subagentLabel;
+
+  /// D-112: 子代理会话的**父** id。非 null 时补页要按子代理地址走。
+  ///
+  /// 和 [subagentLabel] 是一对：只有 [subagentLabel] 时父半边无处可寻——过去
+  /// 这里把 [sessionId] 同时填进两半，而那正是 child 自己的 id，于是引擎每次
+  /// 回 `subagent/unauthorized`，轨迹补页永远补不上。
+  final String? parentSessionId;
 
   /// 记录表一次最多建多少行。
   static const maxRenderedRows = 80;
@@ -53,16 +62,31 @@ class _TrajectoryPaneState extends State<TrajectoryPane> {
   /// 选中的记录；null 表示检查器关着。
   TrajectoryRecord? _selected;
 
+  /// D-112: 子代理但凑不齐父子配对时留下的说明。复用账本已有的错误通道
+  /// （[AppLedgerError] + `trajectoryEarlierFailed` 这行既有文案），所以这件事
+  /// 在界面上是**看得见的**，而不是「点了没反应」。
+  AppLedgerError? _addressError;
+
+  /// D-112: 补页地址。规则由 [addressForSession] 一处定义，chat 侧开 journal
+  /// 与这里补页共用它——过去两边各写各的，而两边都留了同一个兜底（把 child 自己
+  /// 的 id 填进父半边），于是重试、自动重开、轨迹补页同时坏在同一个地方。
+  SessionAddress? get _pageAddress => addressForSession(
+        sessionId: widget.sessionId,
+        subagentLabel: widget.subagentLabel,
+        parentSessionId: widget.parentSessionId,
+      );
+
   Future<void> _loadEarlier() async {
-    final sessionId = widget.sessionId;
-    if (sessionId == null) return;
-    final address = widget.subagentLabel == null
-        ? PlainSessionAddress(sessionId)
-        : SubagentSessionAddress(
-            parentSessionId: sessionId,
-            childSessionId: sessionId,
-            mode: SubagentMode.continuable,
-          );
+    final address = _pageAddress;
+    if (address == null) {
+      // 还没打开会话 = 正常空态，补页键本来就不该出现；子代理缺 parent 才是
+      // 异常，那一条要留痕。
+      if (widget.sessionId != null) {
+        setState(() => _addressError = const AppLedgerError('subagent/parent-missing'));
+      }
+      return;
+    }
+    setState(() => _addressError = null);
     await widget.ledger.loadEarlier(widget.gateway, address);
     if (mounted) setState(() {});
   }
@@ -122,7 +146,7 @@ class _TrajectoryPaneState extends State<TrajectoryPane> {
                   l10n: l10n,
                   loadingEarlier: widget.ledger.loadingEarlier,
                   canLoadEarlier: widget.ledger.hasEarlierHistory,
-                  error: widget.ledger.error?.message,
+                  error: _addressError?.message ?? widget.ledger.error?.message,
                   onLoadEarlier: _loadEarlier,
                   onSelect: (r) => setState(() => _selected = r),
                 )

@@ -369,6 +369,14 @@ class FakeEngineGateway implements EngineGateway {
     int? maxMessages,
   }) async {
     calls.add((call: 'page', args: throughSeq));
+    pagedAddresses.add(address);
+    final why = addressViolation(address);
+    if (why != null) {
+      rejectedAddresses.add((address: address, why: why));
+      return EngineRpcResult.err(
+        EngineRemoteError(code: 'subagent/unauthorized', message: why),
+      );
+    }
     final failure = pageFailure;
     if (failure != null) {
       return EngineRpcResult.err(
@@ -385,6 +393,33 @@ class FakeEngineGateway implements EngineGateway {
     });
   }
 
+  /// D-112: 每个 `session/page` 用过的地址，按顺序。分页同样要在 wire 上寻址
+  /// （子代理是成对的），所以守门测试必须看得到**地址本身**，而 calls 里的
+  /// `args` 只记了 `throughSeq`。
+  final List<SessionAddress> pagedAddresses = [];
+
+  /// D-112: `follow` 被生产语义判为非法而**拒绝**的地址。引擎对缺 parent 或
+  /// parent 就等于 child 的子代理地址回 `subagent/unauthorized`；替身若比生产
+  /// 宽容，D-112 那一族缺陷就能在全绿下逃逸（历史上正是如此）。
+  final List<({SessionAddress address, String why})> rejectedAddresses = [];
+
+  /// 按生产语义校验一个会话地址。null = 合法；否则是拒绝理由。
+  ///
+  /// 规则与引擎一致：普通会话 id 非空；子代理必须有非空 parent，且 parent ≠ child。
+  static String? addressViolation(SessionAddress address) => switch (address) {
+        PlainSessionAddress(:final sessionId) =>
+          sessionId.isEmpty ? 'plain session address needs a session id' : null,
+        SubagentSessionAddress(
+          :final parentSessionId,
+          :final childSessionId,
+        ) =>
+          parentSessionId.isEmpty
+              ? 'subagent address needs a parent session id'
+              : parentSessionId == childSessionId
+                  ? 'subagent address parent must not be the child itself'
+                  : null,
+      };
+
   @override
   SessionEventStream follow({
     required SessionAddress address,
@@ -392,6 +427,15 @@ class FakeEngineGateway implements EngineGateway {
     int? maxMessages,
   }) {
     calls.add((call: 'follow', args: address));
+    final why = addressViolation(address);
+    if (why != null) {
+      rejectedAddresses.add((address: address, why: why));
+      // 像引擎那样把流打成错误，而不是无声地开始服务——守门测试要能看到失败。
+      final controller = StreamController<SessionFollowFrame>();
+      controller.addError(
+          EngineRemoteError(code: 'subagent/unauthorized', message: why));
+      return SessionEventStream.fromSource(controller.stream);
+    }
     return SessionEventStream.fromSource(_followController.stream);
   }
 

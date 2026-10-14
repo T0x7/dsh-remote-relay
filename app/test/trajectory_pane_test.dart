@@ -77,6 +77,8 @@ void main() {
     WidgetTester tester, {
     List<SessionWireEvent>? events,
     bool hasMore = false,
+    String? subagentLabel,
+    String? parentSessionId,
   }) async {
     final window = events ?? _session();
     ledger.reset(
@@ -88,7 +90,8 @@ void main() {
       ledger: ledger,
       gateway: gateway,
       sessionId: 'session-x',
-      subagentLabel: null,
+      subagentLabel: subagentLabel,
+      parentSessionId: parentSessionId,
     )));
     await settle(tester);
   }
@@ -187,6 +190,73 @@ void main() {
       await settle(tester);
 
       expect(find.textContaining('加载更早的记录失败'), findsOneWidget);
+    });
+  });
+
+  // D-112：分页同样要在 wire 上寻址，而子代理是**成对**的。这一组钉的是 D-094
+  // 那一族缺陷在轨迹侧的残留：过去这里把 sessionId 同时填进父子两半，而子代理
+  // 会话里那个 sessionId 就是 child 自己的 id，于是引擎每次回
+  // `subagent/unauthorized`——「更早」永远补不上，且界面一声不吭。
+  group('D-112 · 补页地址与对话侧同一条规则', () {
+    testWidgets('子代理补页走成对地址（父半边是父会话，不是 child）',
+        (tester) async {
+      gateway.pageResults.add((
+        records: [
+          FollowEvent(ev(90, 'user/message', {
+            'turn': 0,
+            'content': [
+              {'type': 'text', 'text': '很久以前说过的一句话'}
+            ],
+          })),
+        ],
+        hasMore: false,
+      ));
+      await mount(
+        tester,
+        hasMore: true,
+        subagentLabel: '基本面周线腿',
+        parentSessionId: 'parent-job',
+      );
+
+      await tester.tap(find.text('加载更早的记录'));
+      await settle(tester);
+
+      expect(gateway.pagedAddresses, hasLength(1));
+      final address = gateway.pagedAddresses.single;
+      expect(address, isA<SubagentSessionAddress>(),
+          reason: '子代理补页不能退化成普通地址');
+      expect((address as SubagentSessionAddress).parentSessionId, 'parent-job');
+      expect(address.childSessionId, 'session-x');
+      expect(gateway.rejectedAddresses, isEmpty);
+      expect(find.text('很久以前说过的一句话'), findsOneWidget);
+    });
+
+    testWidgets('普通会话补页仍是普通地址（别把规则改过头）', (tester) async {
+      await mount(tester, hasMore: true);
+
+      await tester.tap(find.text('加载更早的记录'));
+      await settle(tester);
+
+      expect(gateway.pagedAddresses, hasLength(1));
+      expect(gateway.pagedAddresses.single, isA<PlainSessionAddress>());
+      expect(
+        (gateway.pagedAddresses.single as PlainSessionAddress).sessionId,
+        'session-x',
+      );
+      expect(gateway.rejectedAddresses, isEmpty);
+    });
+
+    testWidgets('子代理缺父 id：不发补页请求，并说清楚为什么', (tester) async {
+      // 这一格正是旧代码的产物：只有 subagentLabel，父子两半都拿 session-x 填。
+      await mount(tester, hasMore: true, subagentLabel: '基本面周线腿');
+
+      await tester.tap(find.text('加载更早的记录'));
+      await settle(tester);
+
+      expect(gateway.pagedAddresses, isEmpty,
+          reason: 'parent 缺失时那个地址只会被引擎拒绝，不该发出去');
+      expect(find.textContaining('subagent/parent-missing'), findsOneWidget,
+          reason: '不发请求可以，但必须告诉用户为什么——否则又是一个死按钮');
     });
   });
 
