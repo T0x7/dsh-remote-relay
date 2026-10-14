@@ -56,6 +56,53 @@ export interface RemoteSessionInfo {
 export type TunnelState = 'connected' | 'connecting' | 'reconnecting' | 'disabled' | 'manual-off';
 
 /**
+ * Header this tunnel stamps on every request it forwards from a paired device.
+ *
+ * WHY (v3.282): the engine's HTTP listener sees every bridged request arrive
+ * from 127.0.0.1, i.e. byte-for-byte "local". Without a marker the plugin
+ * cannot tell a phone from the admin page sitting next to it, and its admin
+ * routes (mint a pairing / revoke every pairing / switch the tunnel) become
+ * remote-reachable — each one is a denial of service against the device doing
+ * it. The stamp is the engine side of that boundary: the plugin refuses those
+ * routes when it sees this header.
+ *
+ * Trust rule: the value is set ONLY here, and any device-supplied copy is
+ * stripped before it is set, so a paired device can neither forge nor suppress
+ * the marker. Stripping also covers `x-forwarded-*`, which would otherwise let
+ * a device spoof its provenance for anything downstream that trusts it.
+ *
+ * Every upstream header set this client builds goes through
+ * {@link markForwardedAsRemote} — HTTP requests and bridged WS upgrades share
+ * `buildUpstreamHeadersInline`, which is the single place the stamp is applied.
+ */
+export const REMOTE_TUNNEL_MARKER_HEADER = 'x-dsh-remote-tunnel';
+const REMOTE_TUNNEL_MARKER_VALUE = '1';
+
+/** Provenance headers a paired device must never pass through to the engine. */
+const DEVICE_FORBIDDEN_HEADERS = [
+  REMOTE_TUNNEL_MARKER_HEADER,
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+] as const;
+
+/**
+ * Mark one forwarded request as tunnel-borne.
+ *
+ * Call it on every header set this client builds for the engine (HTTP requests
+ * and bridged WS upgrades alike); omitting it re-opens the engine-admin hole
+ * for WS-borne traffic.
+ * @param out - the header set about to be sent upstream; mutated in place.
+ * @returns the same object, for call-site chaining.
+ */
+export function markForwardedAsRemote(out: Record<string, string>): Record<string, string> {
+  for (const name of DEVICE_FORBIDDEN_HEADERS) delete out[name]
+  out[REMOTE_TUNNEL_MARKER_HEADER] = REMOTE_TUNNEL_MARKER_VALUE
+  return out
+}
+
+/**
  * End-to-end engine health as seen from the data plane (v3.177).
  *
  * 'connected' only means the tunnel WS to the relay is up — it says nothing
@@ -89,25 +136,54 @@ function dataRoot(instanceRoot?: string): string {
   return instanceRoot ?? process.env.DSH_REMOTE_DATA_ROOT ?? join(homedir(), '.dsh-remote-relay')
 }
 
-function loadSessions(instanceRoot?: string): RemoteSessionInfo[] {
+/**
+ * Durable tunnel state — one document, one writer.
+ *
+ * v3.282: the disconnect intent lived in a private field, so it died with the
+ * process while `config.enabled` kept living in the Host's document. The card
+ * therefore showed "enabled: false" and "已手动断开中继" at the same time,
+ * and only a manual re-enable could clear it. Both facts now have owners and
+ * both survive a restart: `enabled` is the Host's switch, `manualOff` is this
+ * document's, and the state readout derives from them in one place.
+ */
+interface PersistedState {
+  version: number;
+  sessions: RemoteSessionInfo[];
+  /** User turned the relay off by hand. Outlives the process on purpose. */
+  manualOff: boolean;
+}
+
+function emptyState(): PersistedState {
+  return { version: 1, sessions: [], manualOff: false };
+}
+
+function loadState(instanceRoot?: string): PersistedState {
   try {
-    const raw = JSON.parse(readFileSync(join(dataRoot(instanceRoot), 'remote-sessions.json'), 'utf-8')) as { sessions?: RemoteSessionInfo[] }
-    const now = Date.now()
-    return (raw.sessions ?? []).filter(
+    const raw = JSON.parse(
+      readFileSync(join(dataRoot(instanceRoot), 'remote-sessions.json'), 'utf-8'),
+    ) as Partial<PersistedState>;
+    const now = Date.now();
+    const sessions = (raw.sessions ?? []).filter(
       (s) => s && typeof s.sessionId === 'string' && typeof s.pairingToken === 'string'
         && now - (s.createdAt ?? 0) < SESSION_MAX_AGE_MS,
-    )
+    );
+    return { version: 1, sessions, manualOff: raw.manualOff === true };
   } catch {
-    return []
+    // Missing or corrupt file: start clean. A damaged pairing store must not
+    // wedge the tunnel, and a damaged disconnect flag must not strand it in a
+    // state the user cannot reason about — it falls back to "not off".
+    return emptyState();
   }
 }
 
-function saveSessions(sessions: RemoteSessionInfo[], instanceRoot?: string): void {
+function saveState(state: PersistedState, instanceRoot?: string): void {
   const file = join(dataRoot(instanceRoot), 'remote-sessions.json')
   try {
     mkdirSync(dirname(file), { recursive: true })
-    const tmp = `${file}.tmp`
-    writeFileSync(tmp, JSON.stringify({ version: 1, sessions }, null, 2), { mode: 0o600 })
+    // Unique tmp name per writer: the previous fixed `${file}.tmp` let two
+    // processes in one data root interleave write→rename and lose a document.
+    const tmp = `${file}.${process.pid}.tmp`
+    writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 })
     chmodSync(tmp, 0o600)
     renameSync(tmp, file)
   } catch {
@@ -190,6 +266,8 @@ export class RemoteTunnelClient {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isManualClosed = false;
   private reconnectDelayMs: number;
+  /** Revocation delivery budget; injectable so specs need not wait it out. */
+  private readonly deliveryWaitMs: number;
   private tunnelState: TunnelState = 'disabled';
   /** v3.177 数据面实测的引擎健康（见 EngineHealth 注释）。进程内状态，不落盘。 */
   private engineHealth: EngineHealth = 'unknown';
@@ -204,7 +282,22 @@ export class RemoteTunnelClient {
    * 进程拉满内存的 DoS。MAX_BODY 已经是硬上限，并发是软上限（先到先得）。 */
   private pendingLargeResponses = 0
   private static MAX_PENDING_LARGE_RESPONSES = 8
-  /** v3.161：audit 帧 helper——经 /ws/dsh 数据面发往 relay，由 relay 写 audit
+  /**
+   * The single writer for the durable state document.
+   *
+   * Every mutation of `sessions` or `manualOff` goes through here, so there is
+   * one place that knows the on-disk shape and one place that honours
+   * `persist: false`.
+   */
+  private persist(): void {
+    if (!this.persistenceEnabled) return
+    saveState(
+      { version: 1, sessions: [...this.sessions.values()], manualOff: this.manualOff },
+      this.dataRootDir,
+    )
+  }
+
+  /** v3.161:audit 帧 helper——经 /ws/dsh 数据面发往 relay，由 relay 写 audit
    * DB（同 plugin console.warn 双轨：mac 本地看得到 + 远程 watchdog 也能分析）。 */
   private reportAudit(sessionId: string | undefined, eventType: string, details?: string): void {
     console.warn(`[dsh-remote-client][audit] ${eventType}${details ? ' ' + details : ''}`)
@@ -229,34 +322,83 @@ export class RemoteTunnelClient {
   /** Persistence on ⇒ the shared sessions file is the cross-process contract. */
   private readonly persistenceEnabled: boolean;
 
-  constructor(config: RemoteRelayConfig, options?: { reconnectDelayMs?: number; persist?: boolean; dataRoot?: string }) {
+  constructor(config: RemoteRelayConfig, options?: { reconnectDelayMs?: number; persist?: boolean; dataRoot?: string; deliveryWaitMs?: number }) {
     this.config = config;
     // Injectable so tests can exercise the reconnect path without a 5s wait.
     this.reconnectDelayMs = options?.reconnectDelayMs ?? 5000;
+    /** Revocation delivery budget; injectable so specs need not wait it out. */
+    this.deliveryWaitMs = options?.deliveryWaitMs ?? 4000;
     this.dataRootDir = options?.dataRoot;
-    // 恢复历史配对（引擎重启场景）；测试可用 persist:false 隔离文件系统
+    // 测试可用 persist:false 隔离文件系统 —— 这个开关曾经只挡住「读」，写盘
+    // 照旧发生，于是跑一次单测就会覆盖用户真实的 remote-sessions.json。
     this.persistenceEnabled = options?.persist !== false;
-    if (this.persistenceEnabled) {
-      for (const s of loadSessions(this.dataRootDir)) this.sessions.set(s.sessionId, s)
-    }
+    const persisted = this.persistenceEnabled ? loadState(this.dataRootDir) : emptyState();
+    for (const s of persisted.sessions) this.sessions.set(s.sessionId, s)
+    this.manualOff = persisted.manualOff
     this.tunnelState = config.enabled ? 'connecting' : 'disabled'
   }
 
   public updateConfig(newConfig: Partial<RemoteRelayConfig>) {
+    const previous = this.config
     this.config = { ...this.config, ...newConfig };
     if (!this.config.enabled) {
       this.disconnect();
-    } else if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      this.connect();
+      return;
     }
+    // v3.282：身份字段（拨向哪里、以什么身份）必须比对重拨。原先只做浅合并、
+    // 仅在 socket 非 OPEN 时重连，于是改 relay_url 后徽章显示新地址而 socket
+    // 还在旧中继；改 psk 后新铸的会话用新密钥签名、隧道却仍用旧密钥鉴权。
+    const identityChanged =
+      previous.relayUrl !== this.config.relayUrl || previous.psk !== this.config.psk
+    if (identityChanged) {
+      this.disconnect();
+      this.connect();
+      return;
+    }
+    // 从 disabled 回到 enabled 时清掉手动断开意图，否则隧道会拨出去而卡片
+    // 仍报「已手动断开」——与本文件原本那个 bug 方向相反，一样是谎话。
+    this.manualOff = false;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) this.connect();
   }
 
+  /**
+   * Dial the relay.
+   *
+   * @param force - an explicit user action (enable / re-enable), which clears a
+   * previous manual disconnect. It deliberately does NOT bypass `enabled`:
+   * the revoke path used to pass force to reach an otherwise unreachable relay,
+   * which meant revoking from a disabled engine quietly brought the tunnel
+   * back and left it connected.
+   */
   public connect(force = false) {
-    if (!force && (!this.config.enabled || !this.config.relayUrl)) return;
+    // v3.282: force no longer bypasses the master switch. The revocation path
+    // used to rely on that to reach a switched-off relay, and paid for it by
+    // leaving the engine dialed — "turn the remote off, then revoke" silently
+    // turned it back on. Delivery now dials explicitly and always restores.
+    if (!this.config.enabled) return;
+    this.dial(force);
+  }
+
+  /**
+   * Open the socket. The one place a tunnel is created.
+   * @param force - an explicit user action, which clears a manual disconnect.
+   * @param ignoreSwitches - dial even when `enabled` is false. Reserved for
+   * delivering one frame on a switched-off engine (see withTemporaryTunnel);
+   * every caller must restore the prior state afterwards.
+   */
+  private dial(force = false, ignoreSwitches = false) {
     if (!this.config.relayUrl) return;
+    if (!ignoreSwitches && !this.config.enabled) return;
+    // v3.282：在途拨号就是那次拨号。此前没有这道闸，两次并发的 updateConfig 会
+    // 开出两条 socket，而 disconnect() 只关得掉一条——剩下那条既不注册也不
+    // 心跳，没有任何东西会回收它。
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) return;
     // 显式用户动作（开启远程/重新开启）解除手动断开标记——卡片「断开中继」
     // 已同时撤销全部配对，恢复唯一路径就是重新走配对流程
-    if (force) this.manualOff = false;
+    if (force && this.manualOff) {
+      this.manualOff = false;
+      this.persist();
+    }
     this.isManualClosed = false;
 
     try {
@@ -387,7 +529,7 @@ export class RemoteTunnelClient {
       ? this.buildSignedUrl(info, ttlSeconds)
       : `${this.config.relayUrl.replace(/\/$/, '')}/?sessionId=${sessionId}&token=${pairingToken}`;
     this.sessions.set(sessionId, info);
-    saveSessions([...this.sessions.values()], this.dataRootDir);
+    this.persist();
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.registerSession(sessionId, pairingToken);
@@ -476,73 +618,120 @@ export class RemoteTunnelClient {
    *
    * off：isManualClosed 挡住自动重连，manual-off 状态供卡片渲染；已配对
    * 设备的 cookie 在 relay 宽限期内（默认 600s）重连可保活，超时需重新扫
-   * 码——卡片文案负责交代这一后果。引擎重启会按 config.enabled 自动重连。
+   * 码——卡片文案负责交代这一后果。
+   *
+   * v3.282：这个意图现在**落盘**。此前它只活在进程内存里，于是引擎一重启
+   * 就按 config.enabled 悄悄重连，而卡片仍记得自己被手动关过；两个事实分属
+   * 两处存储，界面同时显示「未启用」和「已手动断开」这种自相矛盾的状态。
+   * 落盘后重启保持断开，与卡片文案承诺的恢复路径（点「开启远程控制」）一致。
    */
   public setTunnelEnabled(on: boolean): { state: TunnelState; relayUrl: string } {
     if (on) {
       this.manualOff = false;
+      this.persist();
       this.isManualClosed = false;
       this.connect(true);
     } else {
       this.manualOff = true;
+      this.persist();
       this.disconnect();
       this.tunnelState = 'manual-off';
     }
     return this.getConnectionState();
   }
 
-  /** Tunnel-level state for the settings card status line. */
+  /**
+   * Tunnel-level state for the settings card status line.
+   *
+   * v3.282: the two "off" facts are decided BEFORE the socket, because
+   * `updateConfig` guarantees a disabled/manual-off tunnel has no socket. The
+   * previous order let a live socket win, which is how a connected tunnel
+   * reported itself as disconnected — and, symmetrically, how one dialed while
+   * the card claimed the user had switched it off.
+   */
   public getConnectionState(): { state: TunnelState; relayUrl: string; manualOff: boolean; engine: EngineHealth } {
-    if (this.manualOff) {
+    if (!this.config.enabled) {
+      this.tunnelState = 'disabled'
+    } else if (this.manualOff) {
       this.tunnelState = 'manual-off';
     } else if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.tunnelState = 'connected'
-    } else if (!this.config.enabled) {
-      this.tunnelState = 'disabled'
     } else if (this.tunnelState !== 'reconnecting') {
       this.tunnelState = 'connecting'
     }
     return { state: this.tunnelState, relayUrl: this.config.relayUrl, manualOff: this.manualOff, engine: this.engineHealth }
   }
 
-  /** Revoke a single pairing (v3.170 多 pairing 共存后的细粒度撤销).
+  /**
+ * Run `work` with a usable tunnel, dialling one only if none is live, and put
+ * the tunnel back exactly as it was afterwards.
+ *
+ * WHY: revoking a pairing has to REACH the relay or "断开即失效" is a lie, so a
+ * switched-off engine must still dial for a moment. Both revoke paths used to
+ * do this by hand and restored only when the prior state was `manualOff` — so
+ * "disable the remote, then revoke" left the tunnel connected, and the card
+ * reported a state nobody had asked for.
+ *
+ * @param work - receives the live socket (or null when the relay never
+ * answered) and reports whether the frame was delivered.
+ * @returns what `work` reported.
+ */
+private async withTemporaryTunnel(work: (ws: WebSocket | null) => boolean): Promise<boolean> {
+  const hadLiveSocket = !!this.ws && this.ws.readyState === WebSocket.OPEN
+  const manualBefore = this.manualOff
+  let ws = this.ws
+  if (!hadLiveSocket) {
+    this.dial(true, true)
+    ws = await this.waitForOpenSocket()
+  }
+  try {
+    return work(ws && ws.readyState === WebSocket.OPEN ? ws : null)
+  } finally {
+    if (!hadLiveSocket) {
+      // Unconditional restore: whatever the pre-call intent was, it is again.
+      this.disconnect()
+      this.manualOff = manualBefore
+      this.tunnelState = manualBefore ? 'manual-off' : (this.config.enabled ? 'connecting' : 'disabled')
+    }
+  }
+}
+
+/** Poll briefly for the socket the temporary dial just opened. */
+private async waitForOpenSocket(): Promise<WebSocket | null> {
+  return new Promise<WebSocket | null>((resolve) => {
+    const timer = setTimeout(() => { clearInterval(poll); resolve(null); }, this.deliveryWaitMs);
+    const poll = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        clearInterval(poll); clearTimeout(timer); resolve(this.ws);
+      }
+    }, 50);
+  })
+}
+
+/** Revoke a single pairing (v3.170 多 pairing 共存后的细粒度撤销).
    * 卡片 UI 列出每个 pairing 时,「撤销此 pairing」按钮对应此接口。
    * 同 revokeAllSessions 的"送达守卫":隧道不在时临时拉起送达再收回,
    * 否则宽限期内设备仍可访问,「撤销即失效」破功。 */
   public async revokeSession(sessionId: string): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
-    const wasManual = this.manualOff;
-
-    let ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      this.connect(true);
-      ws = await new Promise<WebSocket | null>((resolve) => {
-        const timer = setTimeout(() => { clearInterval(poll); resolve(null); }, 4000);
-        const poll = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            clearInterval(poll); clearTimeout(timer); resolve(this.ws);
-          }
-        }, 50);
-      });
-    }
-
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    // v3.282: delivered 落进结果——relay 不可达时不能删本地记录却报成功，
+    // 否则设备在宽限期内仍可访问，而这份副本已毁、永不再补发。
+    const delivered = await this.withTemporaryTunnel((ws) => {
+      if (!ws) return false;
       ws.send(JSON.stringify({
         type: 'session.revoke',
         payload: { sessionId, reason: 'User revoked' },
         timestamp: Date.now(),
       }));
+      return true
+    });
+    if (!delivered) {
+      this.reportAudit(sessionId, 'revoke_not_delivered', 'relay unreachable; local copy kept')
+      return false;
     }
     this.sessions.delete(sessionId);
-    saveSessions([...this.sessions.values()], this.dataRootDir);
-
-    // 临时拉起场景:送达后收回,恢复 manual-off(同 revokeAllSessions)
-    if (wasManual) {
-      this.disconnect();
-      this.manualOff = true;
-      this.tunnelState = 'manual-off';
-    }
+    this.persist();
     return true;
   }
 
@@ -552,43 +741,27 @@ export class RemoteTunnelClient {
   public async revokeAllSessions(): Promise<number> {
     const sessions = [...this.sessions.values()];
     if (sessions.length === 0) return 0;
-    const wasManual = this.manualOff;
 
-    let ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      this.connect(true);
-      ws = await new Promise<WebSocket | null>((resolve) => {
-        const timer = setTimeout(() => { clearInterval(poll); resolve(null); }, 4000);
-        const poll = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            clearInterval(poll); clearTimeout(timer); resolve(this.ws);
-          }
-        }, 50);
-      });
-    }
-
-    let revoked = 0
-    for (const session of sessions) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
+    // v3.282:同 revokeSession —— 送达失败就不清本地记录。原先无论 relay 是否
+    // 真的收到都 clear() 并返回条数，把「撤销」变成了本地删除。
+    const delivered = await this.withTemporaryTunnel((ws) => {
+      if (!ws) return false;
+      for (const session of sessions) {
         ws.send(JSON.stringify({
           type: 'session.revoke',
           payload: { sessionId: session.sessionId, reason: 'User revoked' },
           timestamp: Date.now(),
         }));
       }
-      revoked++
+      return true
+    });
+    if (!delivered) {
+      this.reportAudit(undefined, 'revoke_not_delivered', `relay unreachable; ${sessions.length} pairing(s) kept`)
+      return 0;
     }
     this.sessions.clear();
-    saveSessions([], this.dataRootDir);
-
-    // 临时拉起场景：送达后收回，恢复手动断开态（connect(true) 清掉的
-    // manualOff 标记也要还原，否则 getConnectionState 永远卡在 connecting）
-    if (wasManual) {
-      this.disconnect();
-      this.manualOff = true;
-      this.tunnelState = 'manual-off';
-    }
-    return revoked
+    this.persist();
+    return sessions.length
   }
 
   /** @deprecated 单槽时代接口；保留供旧调用兼容，语义 = revokeAll。 */
@@ -682,7 +855,9 @@ export class RemoteTunnelClient {
     // （curl 无 Accept-Encoding 逃过、Firefox 必现，2026-09-07 实证）。
     // plugin↔dsh 是 localhost 零成本；phone↔relay 段由 nginx 继续可压。
     out['accept-encoding'] = 'identity'
-    return out
+    // v3.282：来源标记——本函数产出的头只可能来自隧道，任何设备自带的
+    // x-dsh-remote-tunnel / x-forwarded-* 在这里被剥掉后由隧道自己盖上。
+    return markForwardedAsRemote(out)
   }
 
   private async handleHttpReq(msg: { id: string; method: string; path: string; headers: Record<string, string>; body?: string }): Promise<void> {
@@ -891,6 +1066,15 @@ export class RemoteTunnelClient {
     // token 持有者）。带真 token 的直连请求不受影响（值相同）。改写范围由
     // tokenRewritePrefixes 显式配置，默认为空。
     let upstreamPath = msg.path
+    // v3.282：path 必须以 / 开头，否则拼接出的地址会被 URL 解析器读成
+    // 别的 authority——`ws://127.0.0.1:3080@evil.com/x` 的 host 是 evil.com，
+    // 而上面刚盖上的引擎令牌会跟着发过去。relay 侧本应保证规范形状，这里
+    // 不再信任它：不合形状的请求按 bad_request 回，绝不去连。
+    if (!upstreamPath.startsWith('/')) {
+      this.reportAudit(undefined, 'ws_upgrade_bad_path', `path=${upstreamPath.slice(0, 64)}`)
+      this.sendDataPlaneFrame({ v: 1, type: 'error', id: msg.id, code: 'bad_request', message: 'path must start with /' })
+      return
+    }
     const rewritePrefixes = this.resolveTokenRewritePrefixes()
     if (rewritePrefixes.some((p) => upstreamPath.startsWith(p)) && this.resolveEngineToken()) {
       const qi = upstreamPath.indexOf('?')
@@ -1038,7 +1222,7 @@ export class RemoteTunnelClient {
         this.stopSessionAdoption();
         return;
       }
-      for (const s of loadSessions(this.dataRootDir)) {
+      for (const s of loadState(this.dataRootDir).sessions) {
         if (this.sessions.has(s.sessionId)) continue;
         this.sessions.set(s.sessionId, s);
         console.log(`[dsh-remote-client] adopted pairing ${s.sessionId} (minted by another process)`);
