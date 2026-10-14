@@ -56,5 +56,5 @@ jobs:
       - name: Analyze (must be clean)
         run: flutter analyze
 
-      - name: Test (shell 131: widgets, goldens, landscape)
+      - name: "Test (shell 131: widgets, goldens, landscape)"
         run: flutter test
