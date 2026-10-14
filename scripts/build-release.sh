@@ -56,6 +56,20 @@ mkdir -p "$OUT_DIR"
 # flutter build 没有 --output，产物固定落在 build/app/outputs/…，构建完再收集。
 APK_SRC="$APP/build/app/outputs/flutter-apk"
 AAB_SRC="$APP/build/app/outputs/bundle/release"
+
+# **本次构建的开始标记**——收集产物时只认比它新的文件。
+#
+# `flutter build apk --release --split-per-abi` **只产出三个分架构包，不产通用包**；
+# 而 `$APK_SRC` 是个长期目录，里面躺着更早用 `flutter build apk --release` 留下的
+# `app-release.apk`。一句 `for f in *-release.apk` 会把它和本次产物**一起发上
+# GitHub Releases**——这真的发生过：v0.0.1 线上那个 83MB「通用包」是 **10 月 8 日**
+# 的构建，二进制自检里 `v0.1.0` 命中而 `v0.0.1` 不命中，release manifest 里也没有
+# INTERNET，装上去连不上网。
+#
+# 通配符不是「顺手」——它分不清「这次产的」和「上次剩的」，那就按 mtime 分。
+MARKER="$OUT_DIR/.build-started"
+: > "$MARKER"
+
 say "构建 release（分架构）…"
 ( cd "$APP" && DSH_RELEASE_KEYSTORE="$KEYSTORE" \
   flutter build apk --release --split-per-abi )
@@ -63,15 +77,25 @@ say "构建 release（分架构）…"
   flutter build appbundle --release )
 
 rm -f "$OUT_DIR"/*.apk "$OUT_DIR"/*.aab
-# **只收 release**：`$APK_SRC` 里长期躺着早先 debug 构建的 app-debug.apk，
-# 一次 `cp *.apk` 会把 242MB 的调试包一起捞进发布产物——那正是「检查更新」点下去
-# 会下载到的东西。
+# **只收本次构建产出的 release 包**（上面那个 mtime 过滤在这里生效）：
+#   ① `$APK_SRC` 里长期躺着早先 debug 构建的 app-debug.apk，一次 `cp *.apk` 会把
+#      242MB 的调试包一起捞进发布产物——那正是「检查更新」点下去会下载到的东西；
+#   ② 同样会把**上一次构建残留的旧 release 包**（比如别的日期、别的版本、甚至是
+#      `--split-per-abi` 根本不产出的通用包）一起捞进来，然后原样发布。
 shopt -s nullglob
 found=0
-for f in "$APK_SRC"/*-release.apk; do cp "$f" "$OUT_DIR"/; found=1; done
-[ "$found" = 1 ] || die "没产出 release apk，看 $APK_SRC"
+for f in "$APK_SRC"/*-release.apk; do
+  if [ "$f" -nt "$MARKER" ]; then
+    cp "$f" "$OUT_DIR"/
+    found=$((found + 1))
+  else
+    say "跳过陈旧产物（早于本次构建，不会发布）：$(basename "$f")"
+  fi
+done
+[ "$found" -ge 1 ] || die "没产出 release apk，看 $APK_SRC"
+say "收集到 $found 个本次构建的 apk"
 cp "$AAB_SRC"/app-release.aab "$OUT_DIR"/ 2>/dev/null || die "没产出 aab，看 $AAB_SRC"
-cp "$AAB_SRC"/app-release.aab "$OUT_DIR"/ 2>/dev/null || die "没产出 aab，看 $AAB_SRC"
+rm -f "$MARKER"
 
 APKS=("$OUT_DIR"/*.apk)
 AAB="$OUT_DIR/app-release.aab"
