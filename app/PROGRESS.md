@@ -1073,3 +1073,32 @@ relay 侧（`server/src/config.ts` + `index.ts`）：
 插件侧（agent-stock 仓，`agent-stock-remote`）：`psk` 缺失或等于
 `agent-stock-default-insecure-psk` → 拒绝启用。**relay 侧本来就有这道守卫，两边
 不对称**——今天讨论时先被误判成 relay 的洞，实为插件缺同一道防线。待做。
+
+### D-113 备份/截屏硬保证 + PSK 去重 + D-112 上生产
+
+三件收尾（用户「之前说的没做的都搞定」）：
+
+① **隐私表的承诺补成硬保证**：design §8 写着凭证「不随备份出设备」，但 main
+manifest 里**根本没有** `android:allowBackup` 那一行——靠「日志在 cache 目录」
+这个间接事实，而凭证本身（security-crypto 偏好）默认是会被云备份带走的。
+→ allowBackup=false + fullBackupContent=false + 逐项排除的 data_extraction_rules
+（cloud-backup 与 device-transfer 两个通道，Android 12+ 的换机迁移才算拦住）。
+另加 MainActivity 的 FLAG_SECURE 防截屏/录屏（屏 E 是真实业务内容）。知情代价：
+用户不能再截图反馈，真机排障走 adb screencap 与屏 G 诊断日志。
+守门 `test/android_hardening_test.dart` 3 条**读文件本身**（原生改动 widget 测试
+进不去，而这类漏洞正是靠文档漏的）；回退即红已验。app 507/507，debug APK 编译通过。
+
+② **`cordis.patch.yml` 两份 PSK 的真相**：两份配置插件 id 不同（`agent-stock-remote`
+与 `dsh-remote`），而 harness 里**没有名为 `dsh-remote` 的插件**（只有
+`dsh-remote-mock` 测试替身）→ 第 161 行是死配置。活的确认靠 D-111 生产实测：
+`url-session` 回的是真签名 24h url，正是 `agent-stock-remote` 的代码路径。死配置
+已删（备份 `cordis.patch.yml.bak-dedup-*`），PSK 现在只剩一处。
+
+③ **D-112 上 VPS 生产**：不打整体替换（部署版 9-30，差 105 行），只贴三处，本地
+用 VPS 整套 src + 同款 tsc 验过再上传；备份 `*.bak-d112`。实测：env 有 PSK 时
+**不生成**（0 横幅、无文件）；空 PSK 启动**生成 64 字符**并打印路径；第二次启动
+**复用**上次那把（顺手验了「重启复用」）。
+
+④ **插件侧 D-112 未部署**：跑着的引擎用 `.app` bundle 里的编译产物，要生效得
+`scripts/build-dist.sh` 重打整个 App，而 vendor 树里还有**别人 25 处未提交改动**
+会被一起烤进正在跑的引擎。没做。当前配置本身是对的，守卫是纵深防御。

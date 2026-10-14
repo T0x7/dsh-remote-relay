@@ -1,4 +1,4 @@
-# App 端实测踩坑与修复（D-067 ~ D-111）
+# App 端实测踩坑与修复（D-067 ~ D-113）
 
 > 这份文档记录 **Flutter App 在真机上暴露的问题、根因与修复**。每条都是先
 > 实锤根因、再写红测试、最后真机复验的闭环——多数坑的共同点是「看起来是
@@ -778,3 +778,62 @@ server 103/103。
 `agent-stock-default-insecure-psk` → 拒绝启用。relay 侧本来就有这道守卫
 （`config.ts:101-110`），**两边不对称**：本轮讨论中先被误判成「relay 的洞」，
 其实是引擎插件缺了同一道防线。
+
+### 6.21 收尾：备份/截屏硬保证、PSK 去重、D-112 上生产（D-113）
+
+**① 隐私表的承诺补成硬保证（D-113）**
+
+顺着「要不要给 APK 加固」那轮查出来两处**文档写了、代码没做**：
+
+- **备份**：design §8 写着凭证「不随备份出设备」，而 main manifest 里**根本没有**
+  `android:allowBackup` 那一行——靠「日志落在 cache 目录，cache 不进备份」这个
+  间接事实。而凭证本身（flutter_secure_storage 的 AndroidX security-crypto 偏好）
+  默认**是**会被云备份带走的；Android 12+ 还得看 `dataExtractionRules`，光写
+  allowBackup 拦不住设备换机迁移。→ allowBackup=false + fullBackupContent=false +
+  逐项排除的 data_extraction_rules（cloud-backup 与 device-transfer **两个通道**）。
+- **截屏**：屏 E 是真实业务内容（正文、工具调用、文件路径、用量），系统截屏/录屏/
+  最近任务缩略图都能带走而 App 无感。→ MainActivity.onCreate 设 FLAG_SECURE。
+  知情代价：用户不能再截图反馈；真机排障走 `adb screencap`（ADB 通道不受影响）
+  与 App 内诊断日志（屏 G），本项目一直靠这两条。
+
+  守门是**读文件本身**——原生改动 widget 测试进不去，而这类漏洞正是靠文档才漏
+  的。删掉 `allowBackup` 那一行，守门立刻变红（已验）。
+
+**② `cordis.patch.yml` 里两份 PSK 的真相**
+
+两份都是 `enabled/relay_url/psk`，但**插件 id 不同**：`agent-stock-remote`（第 31 行）
+与 `dsh-remote`（第 161 行）。而 **harness 里根本没有名为 `dsh-remote` 的插件**（只有
+`@deepseek-ai/dsh-remote-mock` 这个测试替身）——所以第 161 行是**死配置**。
+
+为什么确定活的那个是 `agent-stock-remote`：D-111 的生产实测里，打 `/dsh-remote/url-session`
+时 relay 转发到了引擎，**回的是一把真签名的 24h url**——那正是 `agent-stock-remote`
+的代码路径（`plugin/src/index.ts` 的 `url-session` 分支）。
+
+死配置的风险不是安全，是**误导**：改 PSK 时改到死的那份会疑惑"怎么没生效"；
+轮换要改两处其中一处没用；哪天有人把插件改回这个名字，它会带着旧 PSK 悄悄复活。
+已删除，备份 `cordis.patch.yml.bak-dedup-*`，现在 PSK 只剩一处。
+
+**③ D-112 上生产（VPS）**
+
+沿用 D-111 的纪律：**不打整体替换**（部署版是 9-30 的，与本地差 105 行），只把
+D-112 的三处贴上去，本地拉下 VPS 整套 src 用同款 tsc 验过（TSC_EXIT=0）才上传；
+备份 `index.ts.bak-d112` / `config.ts.bak-d112`。
+
+生产实测（真镜像、一次性容器、独立卷）：
+
+| 断言 | 结果 |
+|---|---|
+| VPS 有 `.env` PSK 时**不**生成 | 0 次横幅、**无** `generated-psk` 文件 ✓ |
+| 空 PSK 启动 → 生成并落盘 | 横幅打印路径，文件 **64 字符** ✓ |
+| 第二次启动复用上次那把 | 横幅措辞是「上次生成的」，未重造 ✓ |
+
+第二条顺手把「重启复用」这条性质在生产里也验了——上一轮被中断的容器已经生成过，
+这一轮直接复用。
+
+**④ 插件侧 D-112 未部署（诚实记一笔）**
+
+插件源码改了、测试 33 过，但**跑着的引擎用的是 `.app` bundle 里的编译产物**。
+要生效得跑 `scripts/build-dist.sh` 重打整个 App——而 vendor 树里还有**别人 25 处
+未提交改动**（`agent-stock-sys-schedule`），重打会把它们一起烤进正在跑的引擎。
+没做，也不建议现在做；要么等那批改动落地，要么就手工改 bundle 里的编译产物
+（会与源码漂移，下次真构建自动纠正）。当前配置本身是对的，守卫是纵深防御。
