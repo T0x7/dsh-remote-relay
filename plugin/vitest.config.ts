@@ -75,6 +75,24 @@ export default defineConfig({
     // artifact, an installed dsh) and skips with a message when unmet, so
     // `pnpm test` is green in a bare checkout and exhaustive in CI.
     include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx', 'tests/**/*.e2e.ts'],
+    // The render spec needs the vendor tree (see the alias block below). It
+    // cannot skip itself: its import of the primitives package is a literal
+    // specifier, which Vite resolves during transform — so on a checkout
+    // without the vendor tree the first undeclared external it pulls in
+    // (`simple-icons`) kills the file at load, and a whole-file failure is not
+    // a skip. This job therefore did not run this spec, it failed on it, and
+    // that only stayed hidden for as long as the job died earlier at install.
+    //
+    // Exclude it here rather than stubbing the import: a stub would make the
+    // controlled-input assertion pass against a double, which is exactly the
+    // fake-greener-than-production trap that spec exists to close. Skipping is
+    // honest about the coverage this environment does not have.
+    //
+    // `exclude` replaces Vitest's defaults, so they are restated here.
+    exclude: hasVendorPrimitives
+      ? ['**/node_modules/**', '**/dist/**', '**/cypress/**', '**/.{idea,git,cache,output,temp}/**']
+      : ['**/node_modules/**', '**/dist/**', '**/cypress/**', '**/.{idea,git,cache,output,temp}/**',
+         'tests/form-render.spec.tsx'],
   },
   resolve: {
     alias: [

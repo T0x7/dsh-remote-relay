@@ -14,10 +14,26 @@ PSK="e2e-stub-psk-$RANDOM"
 cleanup() { pkill -P $$ 2>/dev/null; lsof -ti :8083 -ti :9998 2>/dev/null | xargs kill 2>/dev/null; }
 trap cleanup EXIT
 
+# Every failure path goes through here. The early exits used to append to $OUT
+# and exit without printing it, so a red CI run showed "Process completed with
+# exit code 1" and nothing else — indistinguishable from a script that never
+# ran, which is why the one environment-specific failure below took a full
+# diagnosis round to pin down instead of one log read.
+fail() {
+  echo "[e2e-stub] FAIL: $1" | tee -a "$OUT" >/dev/null
+  cat "$OUT"
+  exit 1
+}
+
 # upstream "SPA"
 node -e 'require("http").createServer((q,s)=>{s.setHeader("content-type","text/html");s.end("<html>ok-spa-e2e</html>")}).listen(9998,"127.0.0.1")' >/dev/null 2>&1 &
-sleep 0.5
-curl -s -m 3 http://127.0.0.1:9998/ | grep -q ok-spa-e2e && echo "[e2e-stub] upstream up" >> $OUT || { echo "[e2e-stub] FAIL: upstream dead" >> $OUT; exit 1; }
+# Poll for it the way the relay is polled below, instead of sleeping a fixed
+# half second and probing once. On a cold CI runner node takes seconds to boot,
+# and a single 3s probe after 0.5s loses that race — which is exactly what this
+# step did before, only on machines slower than the developer's.
+for i in $(seq 1 50); do curl -sf -m 2 http://127.0.0.1:9998/ | grep -q ok-spa-e2e && break; sleep 0.2; done
+curl -sf -m 3 http://127.0.0.1:9998/ | grep -q ok-spa-e2e || fail "upstream dead"
+echo "[e2e-stub] upstream up" >> $OUT
 
 # relay server (exec so kill works)
 cd $ROOT/server && HOST=127.0.0.1 PORT=8083 RELAY_PSK=$PSK RELAY_PUBLIC_HOST=127.0.0.1:8083 \
@@ -40,7 +56,11 @@ cd $ROOT/client && DSH_REMOTE_RELAY_URL=http://127.0.0.1:8083 DSH_REMOTE_PSK=$PS
 QR_URL=$(grep -E '^http://127\.0\.0\.1:8083/\?sessionId=' $TMP/pair.log | head -1)
 echo "[e2e-stub] pair sessionId: $(grep -o 'sess_[0-9a-f]*' $TMP/pair.log | head -1)" >> $OUT
 echo "[e2e-stub] QR rendered in terminal: $(grep -c '█' $TMP/pair.log) block chars" >> $OUT
-if [ -z "$QR_URL" ]; then echo "[e2e-stub] FAIL: no QR URL" >> $OUT; head -5 $TMP/pair.log >> $OUT; exit 1; fi
+if [ -z "$QR_URL" ]; then
+  echo "[e2e-stub] pair.log head:" | tee -a "$OUT" >/dev/null
+  head -5 "$TMP/pair.log" | tee -a "$OUT" >/dev/null
+  fail "no QR URL"
+fi
 
 sleep 3.5   # serve 的配对收养轮询（2s）把 pair 进程铸的配对经活隧道补注册
 CODE=$(curl -s -L -m 15 -o $TMP/scan.html -w '%{http_code}' "$QR_URL")
