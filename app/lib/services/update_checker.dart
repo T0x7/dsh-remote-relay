@@ -28,12 +28,18 @@ class _HttpUpdateChecker implements UpdateChecker {
 
   @override
   Future<UpdateCheck> fetch() async {
-    final uri = Uri.https('api.github.com', '/repos/$repo/releases/latest');
+    // 用 /releases **列表**而不是 /releases/latest，两个理由都踩过：
+    // ① latest 是按**发布时间**挑的，不是按版本号——发版顺序一乱就会把旧版当
+    //    新版推给用户；
+    // ② latest **排除 prerelease**——一旦把发布标记成 beta（正是本项目的定位），
+    //    这个端点直接 404，「检查更新」就永远失败（v0.0.1 真机实测）。
+    // 列表拿到后自己按版本号挑最高的，顺带天然支持 prerelease。
+    final uri = Uri.https('api.github.com', '/repos/$repo/releases');
     try {
       final body = await _httpGet(uri);
       final decoded = jsonDecode(body);
-      if (decoded is! Map) return UpdateCheck.failed(UpdateError.badJson);
-      return UpdateCheck.fromReleaseJson(decoded.cast<String, dynamic>());
+      if (decoded is! List) return UpdateCheck.failed(UpdateError.badJson);
+      return UpdateCheck.fromReleaseList(decoded.cast<Map<dynamic, dynamic>>());
     } on Object catch (e) {
       return UpdateCheck.failed('$e');
     }
@@ -92,7 +98,31 @@ class UpdateCheck {
   /// 也不该硬编码中文）。
   final Object? error;
 
-  /// 从 `releases/latest` 的 JSON 取。
+  /// 从 `/releases` **列表**里挑版本号最高的一条（忽略 draft）。
+  ///
+  /// prerelease 一律**要**看：本项目首个公开版本就标成 beta，若沿用
+  /// `/releases/latest` 就会因为它排除 prerelease 而永远 404。beta 不是
+  /// 「不该被看见」，是「该被看见但别当成 stable」——而区分这两件事的应该是
+  /// 版本号，不是 GitHub 那个 latest 的挑选规则。
+  factory UpdateCheck.fromReleaseList(List<Map<dynamic, dynamic>> releases) {
+    Map<String, dynamic>? best;
+    var bestVersion = '';
+    for (final raw in releases) {
+      final map = raw.cast<String, dynamic>();
+      if (map['draft'] == true) continue;
+      final tag = (map['tag_name'] as String?)?.trim();
+      if (tag == null || tag.isEmpty) continue;
+      final v = tag.startsWith('v') ? tag.substring(1) : tag;
+      if (best == null || isNewer(v, bestVersion)) {
+        best = map;
+        bestVersion = v;
+      }
+    }
+    if (best == null) return UpdateCheck.failed(UpdateError.noTag);
+    return UpdateCheck.fromReleaseJson(best);
+  }
+
+  /// 从单条 release 的 JSON 取。
   ///
   /// 两个容易踩的点：① `tag_name` 可能带 `v` 前缀；② **不能用 API 返回顺序或
   /// `published_at` 判新旧**——GitHub 的 latest 按发布时间挑而不是按版本号，

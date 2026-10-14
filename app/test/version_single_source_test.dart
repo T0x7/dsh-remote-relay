@@ -66,7 +66,7 @@ void main() {
     final client = HttpClient()..userAgent = 'dsh-remote-app/$kAppVersion';
     try {
       final uri = Uri.https('api.github.com',
-          '/repos/$kSourceRepository/releases/latest');
+          '/repos/$kSourceRepository/releases');
       final res = await (await client.getUrl(uri)).close();
       expect(res.statusCode, 200,
           reason: '「检查更新」失败的最常见原因就是这条 URL 拼错');

@@ -77,6 +77,48 @@ void main() {
       expect(c.latest, older);
     });
 
+    // v0.0.1 真机踩的：GitHub 的 /releases/latest **排除 prerelease**，
+    // 一旦把发布标成 beta 那个端点就 404 ⇒「检查更新永远失败」。
+    // 所以端点必须是 /releases 列表 + 自己按版本号挑。
+    test('列表里挑版本号最高的，且 draft 被跳过', () {
+      final c = UpdateCheck.fromReleaseList([
+        {'tag_name': 'v0.0.9', 'prerelease': true, 'draft': false},
+        {'tag_name': 'v0.2.0', 'draft': false},
+        {'tag_name': 'v0.3.0-draft', 'draft': true},
+        {'tag_name': 'v0.1.0', 'prerelease': true},
+      ]);
+      expect(c.latest, '0.2.0',
+          reason: '按版本号挑，不是按数组顺序；draft 必须跳过');
+      expect(c.available, isTrue, reason: '0.2.0 比当前 0.0.1 新');
+    });
+
+    test('prerelease 也要能被看到——本项目自己就是 beta（走 fetch()）', () async {
+      // ⚠️ 必须走 fetch()：直接调 fromReleaseList 时**改端点根本不会红**——
+      // 这条守门一度是假绿的（今天第二次同族：守门守在了错误的层）。
+      // 真正的不变量在 fetch() 选的那个 URL 上。
+      Uri? hit;
+      releaseFetcher = (uri) async {
+        hit = uri;
+        return jsonEncode([
+          {'tag_name': 'v0.0.2', 'prerelease': true, 'draft': false},
+        ]);
+      };
+      final c = await UpdateChecker.instance().fetch();
+      expect(hit!.path, '/repos/T0x7/dsh-remote-relay/releases',
+          reason: '不能用 /releases/latest —— 它排除 prerelease，'
+              '本项目首个公开版就标成 beta，那条路真机实测 404');
+      expect(hit!.path, isNot(contains('/latest')));
+      expect(c.latest, '0.0.2');
+      expect(c.available, isTrue);
+    });
+
+    test('空列表 / 全是 draft → 失败而不是崩', () {
+      expect(UpdateCheck.fromReleaseList(const []).available, isFalse);
+      expect(UpdateCheck.fromReleaseList([
+        {'tag_name': 'v9.9.9', 'draft': true},
+      ]).available, isFalse);
+    });
+
     test('缺 tag_name → 失败而不是崩', () {
       final c = UpdateCheck.fromReleaseJson({'body': 'no tag'});
       expect(c.available, isFalse);
@@ -104,7 +146,10 @@ void main() {
       AppLog.sink = sink;
       addTearDown(() => AppLog.sink = previous);
 
-      releaseFetcher = (uri) async => jsonEncode({'tag_name': 'v9.9.9'});
+      // fetch() 现在要 /releases 的**列表**（见 fromReleaseList）
+      releaseFetcher = (uri) async => jsonEncode([
+        {'tag_name': 'v9.9.9', 'draft': false},
+      ]);
       final c = await UpdateChecker.instance().fetch();
       c.logAudit();
 
