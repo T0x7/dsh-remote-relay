@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../data/machines_repository.dart';
 import '../data/settings_store.dart';
 import '../l10n/generated/app_localizations.dart';
+import '../services/update_checker.dart';
 import '../lock/biometric_gate.dart';
 import '../ui/theme.dart';
 import 'about_page.dart';
@@ -126,6 +128,12 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () => _push(context, LanguagePage(store: _localeStore)),
               ),
               _navTile(
+                icon: Icons.system_update_alt_rounded,
+                title: l10n.settingsUpdateCheckTitle,
+                subtitle: _updateSubtitle(l10n),
+                onTap: _runUpdateCheck,
+              ),
+              _navTile(
                 icon: Icons.article_outlined,
                 title: l10n.settingsDiagnosticsTitle,
                 subtitle: l10n.settingsDiagnosticsSub,
@@ -149,6 +157,73 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  /// D-114 更新检查的最近一次结果。**只在用户点开设置页时**才查——不后台轮询：
+  /// 「零遥测」是这个 App 对外声明的卖点之一（关于页），一个静默的对外请求会
+  /// 让那句话变成谎。
+  UpdateCheck? _update;
+
+  String _updateSubtitle(L10n l10n) {
+    final r = _update;
+    if (r == null) return l10n.settingsUpdateCheckSub;
+    if (!r.available) {
+      if (r.error is UpdateError) {
+        return l10n.updateCheckFailed(switch (r.error! as UpdateError) {
+          UpdateError.badJson => l10n.updateErrBadJson,
+          UpdateError.noTag => l10n.updateErrNoTag,
+        });
+      }
+      if (r.error != null) return l10n.updateCheckFailed(l10n.updateCheckIdle);
+      return l10n.settingsUpdateCheckSub;
+    }
+    final mb = r.bytes == null ? '' : ' · ${l10n.updateCheckSize(_mb(r.bytes!))}';
+    return l10n.updateCheckAvailable(r.latest!) + mb;
+  }
+
+  static String _mb(int bytes) => (bytes / 1024 / 1024).toStringAsFixed(1);
+
+  Future<void> _runUpdateCheck() async {
+    setState(() => _update = null); // 触发「正在检查…」
+    final l10n = L10n.of(context);
+    final result = await UpdateChecker.instance().fetch()
+      ..logAudit();
+    if (!mounted) return;
+    setState(() => _update = result);
+    if (result.available && result.url != null) {
+      // 只提示，不自动装：Android 没有签名密钥吊销机制，而自动更新通道一旦被
+      // 攻破，等于让攻击者往一台能远程操控你电脑的手机里装任意代码。
+      await showDialog<void>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: Text(l10n.updateCheckAvailable(result.latest!)),
+          content: SingleChildScrollView(
+            child: Text(result.notes?.trim().isNotEmpty == true
+                ? result.notes!.trim()
+                : l10n.settingsUpdateCheckSub),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialog).pop(),
+              child: Text(l10n.diagnosticsCancel),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialog).pop();
+                _openUrl(result.url!);
+              },
+              child: Text(l10n.updateCheckOpen),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _openUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   Widget _switchTile({

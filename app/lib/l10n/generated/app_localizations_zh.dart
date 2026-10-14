@@ -1229,4 +1229,45 @@ class L10nZh extends L10n {
 
   @override
   String get diagnosticsChannelEmpty => '该通道暂无日志。';
+
+  @override
+  String get settingsUpdateCheckTitle => '检查更新';
+
+  @override
+  String get settingsUpdateCheckSub => '向 GitHub 查询有没有新版本（只提示，不自动安装）';
+
+  @override
+  String get updateCheckIdle => '未检查';
+
+  @override
+  String get updateCheckChecking => '正在检查…';
+
+  @override
+  String updateCheckUpToDate(Object version) {
+    return '已是最新版本（$version）';
+  }
+
+  @override
+  String updateCheckAvailable(Object latest) {
+    return '发现新版本 $latest';
+  }
+
+  @override
+  String updateCheckFailed(Object reason) {
+    return '检查失败：$reason';
+  }
+
+  @override
+  String get updateCheckOpen => '打开下载页';
+
+  @override
+  String updateCheckSize(Object mb) {
+    return '$mb MB';
+  }
+
+  @override
+  String get updateErrBadJson => '返回内容不是 JSON 对象';
+
+  @override
+  String get updateErrNoTag => '该 release 没有版本号';
 }

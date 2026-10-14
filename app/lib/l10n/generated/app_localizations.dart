@@ -2358,6 +2358,72 @@ abstract class L10n {
   /// In en, this message translates to:
   /// **'No entries in this channel.'**
   String get diagnosticsChannelEmpty;
+
+  /// No description provided for @settingsUpdateCheckTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Check for updates'**
+  String get settingsUpdateCheckTitle;
+
+  /// No description provided for @settingsUpdateCheckSub.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask GitHub whether a newer build exists (prompt only, never auto-installs)'**
+  String get settingsUpdateCheckSub;
+
+  /// No description provided for @updateCheckIdle.
+  ///
+  /// In en, this message translates to:
+  /// **'Not checked yet'**
+  String get updateCheckIdle;
+
+  /// No description provided for @updateCheckChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking…'**
+  String get updateCheckChecking;
+
+  /// No description provided for @updateCheckUpToDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Up to date ({version})'**
+  String updateCheckUpToDate(Object version);
+
+  /// No description provided for @updateCheckAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'New version {latest} available'**
+  String updateCheckAvailable(Object latest);
+
+  /// No description provided for @updateCheckFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Check failed: {reason}'**
+  String updateCheckFailed(Object reason);
+
+  /// No description provided for @updateCheckOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Open download page'**
+  String get updateCheckOpen;
+
+  /// No description provided for @updateCheckSize.
+  ///
+  /// In en, this message translates to:
+  /// **'{mb} MB'**
+  String updateCheckSize(Object mb);
+
+  /// No description provided for @updateErrBadJson.
+  ///
+  /// In en, this message translates to:
+  /// **'Response was not a JSON object'**
+  String get updateErrBadJson;
+
+  /// No description provided for @updateErrNoTag.
+  ///
+  /// In en, this message translates to:
+  /// **'That release has no version tag'**
+  String get updateErrNoTag;
 }
 
 class _L10nDelegate extends LocalizationsDelegate<L10n> {

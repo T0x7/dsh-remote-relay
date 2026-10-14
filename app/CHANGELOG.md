@@ -5,6 +5,55 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-10-14
+
+First shippable build: the diagnostic stack, credential lifecycle and console
+recovery paths are all real and machine-verified (see `docs/app-field-notes.md`
+§6.13–§6.21).
+
+### Added
+
+- **Three-channel diagnostics** (D-107) — `app.log` / `crash.log` /
+  `audit.log`, each with its own rolling quota, plus a channel switcher on the
+  diagnostics page. Frame logging is aggregated (first 3 frames verbatim, then
+  a per-2s summary by frame type): a 30s stream used to write ~6000 lines and
+  evict the evidence; it now writes ~18.
+- **Global crash capture** (D-107) — `FlutterError.onError` +
+  `PlatformDispatcher.onError` + `runZonedGuarded`. Before this, a crash left
+  the diagnostics page empty. The existing handler is still invoked, so the
+  debug red screen survives.
+- **Action log** (D-107) — 11 key actions and state transitions, written in
+  release builds too.
+- **Cold-start session restore** (D-109) — the console reopens *the session you
+  were last reading*, not whichever one the engine touched most recently.
+- **Terminal credential state** (D-110) — an expired credential no longer shows
+  an infinite "reconnecting…"; it says it will not recover and offers the one
+  action that works.
+- **Credentials survive a backup** (D-113) — `allowBackup=false`,
+  `fullBackupContent=false`, and a `dataExtractionRules` file that blocks both
+  cloud backup and device-to-device transfer.
+- **FLAG_SECURE** (D-113) — screenshots / screen recording of the console are
+  blocked. Use `adb screencap` or the in-app diagnostics page to report issues.
+- **Relay mints its own PSK** (D-112) — a missing (or still-insecure-default)
+  PSK is generated, persisted to the data volume and printed as a path rather
+  than refusing to boot. Minimum length 32.
+- **Expired credentials can be re-armed** (D-111) — the relay allows exactly one
+  path (`/dsh-remote/url-session`) to accept an expired-but-unrevoked,
+  within-cap credential, so a missed renewal window is no longer terminal.
+  The data plane stays locked for the same token.
+
+### Fixed
+
+- **Session titles survive a restart** (D-109) — `SessionTitleCache.load()` was
+  only ever called from a test, so the cache was written but never rehydrated.
+- **Golden baseline encoded a single moment** (D-108) — the "expired machine"
+  fixture was minted from the wall clock while the render clock was frozen, so
+  the stored baseline described a state that existed for a few hours on
+  2026-10-03 and could never be reproduced again.
+- **Two PSK entries in the engine profile** (D-113) — a second, dead
+  `dsh-remote` block duplicated the live `agent-stock-remote` one; there is no
+  plugin by that name in the harness.
+
 ### Changed
 
 - **Persisted thinking is now viewable in history (D-088)** — the engine

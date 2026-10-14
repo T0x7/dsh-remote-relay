@@ -425,5 +425,16 @@
   "diagnosticsChannelApp": "Runtime",
   "diagnosticsChannelCrash": "Crash",
   "diagnosticsChannelAudit": "Actions",
-  "diagnosticsChannelEmpty": "No entries in this channel."
+  "diagnosticsChannelEmpty": "No entries in this channel.",
+  "settingsUpdateCheckTitle": "Check for updates",
+  "settingsUpdateCheckSub": "Ask GitHub whether a newer build exists (prompt only, never auto-installs)",
+  "updateCheckIdle": "Not checked yet",
+  "updateCheckChecking": "Checking…",
+  "updateCheckUpToDate": "Up to date ({version})",
+  "updateCheckAvailable": "New version {latest} available",
+  "updateCheckFailed": "Check failed: {reason}",
+  "updateCheckOpen": "Open download page",
+  "updateCheckSize": "{mb} MB",
+  "updateErrBadJson": "Response was not a JSON object",
+  "updateErrNoTag": "That release has no version tag"
 }

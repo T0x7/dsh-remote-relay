@@ -1102,3 +1102,45 @@ manifest 里**根本没有** `android:allowBackup` 那一行——靠「日志�
 ④ **插件侧 D-112 未部署**：跑着的引擎用 `.app` bundle 里的编译产物，要生效得
 `scripts/build-dist.sh` 重打整个 App，而 vendor 树里还有**别人 25 处未提交改动**
 会被一起烤进正在跑的引擎。没做。当前配置本身是对的，守卫是纵深防御。
+
+### D-114 检查更新（只提示不自动装）+ 正式签名 + 单一版本源
+
+运维提「能不能把 apk 推 GitHub、客户端检查更新」。**做的是检查更新，不是自更新**——
+两个硬理由：①**Android 没有签名密钥吊销机制**（iOS 有），自动更新通道被攻破 =
+攻击者能往一台能远程操控你电脑的手机里装任意代码；②自更新要求 App 长期持有发布
+签名私钥，而密钥泄露只能靠**改包名**止损（放弃全部已装用户）、密钥丢失则全体无法
+升级。签名密钥的等级高于 relay PSK（今天 PSK 还是明文躺在 YAML 里），没有安全存放
+方案之前不引入自动安装。
+
+- **单一版本源**：本仓历史上三处版本号各说各话（pubspec `1.0.0+1` / about 常量
+  `0.1.0` / CHANGELOG `0.1.0`），而「拿哪个版本号去比更新」正是这条链路的前置。
+  现以 pubspec 为权威，`about_info` 改 1.0.0，CHANGELOG 封 `## [1.0.0]`，并用
+  `test/version_single_source_test.dart`（5 条）把三方钉住。**不引
+  `package_info_plus`**：那要过依赖白名单纪律，而版本一致性用守门钉住就够。
+- **更新检查**（`lib/services/update_checker.dart`）：查 `releases/latest`，**只按
+  版本号判新旧**——GitHub 的 latest 是按发布时间挑的，顺序一错就会把旧版当新版推
+  给用户（用例 `0.9.9` 那条就是钉这个）。版本比较自写 10 行，不引 `pub_semver`。
+  挑 APK 优先 arm64（小米 Civi）。每次检查落一行 `action=update.check` audit。
+- **零硬编码文案守卫当场立功**：我第一版把错误消息写成中文，守卫逮到 2 处。改成
+  `UpdateError` 枚举 + l10n 文案，checker 仍不 import Flutter。
+- **正式签名**：`build.gradle.kts` 此前 release 借�� **debug 签名**（换机器就丢）。
+  现从环境变量读 `DSH_RELEASE_KEYSTORE/_STORE_PASSWORD/_KEY_PASSWORD/_KEY_ALIAS`，
+  没配就**构建失败并说清怎么办**，而不是悄悄退回 debug。密钥生成在
+  `~/.config/dsh-remote/signing/`（仓库外，`android/.gitignore` 也挡了
+  `*.jks`/`*.keystore`）。
+- **打包脚本** `scripts/build-release.sh`：版本一致性三重校验（pubspec / CHANGELOG /
+  about 常量）→ 密钥必须在仓库外 → `--split-per-abi` release（debug 213MB →
+  分架构 40–60MB）→ 产物收集到 `dist/release/` → **默认不发布**，要
+  `DSH_RELEASE_PUBLISH=1` 才继续（打 tag + `gh release create`）。
+
+**途中踩到 Flutter 的一个已知坑**：`integration_test` 在 dev_dependencies（D-080 真机
+E2E 要用），而 registrant 生成器不按 `dev_dependency` 过滤，把这个**只该出现在测试
+包里**的插件写进了 main 源集 ⇒ `flutter build apk --release` 编译失败
+（`package dev.flutter.plugins.integration_test does not exist`）。官方没有开关
+（`build apk` 全部选项里没有 `--no-dev`）。解法不是删文件——registrant 还要注册
+flutter_secure_storage / url_launcher 这些真插件——而是在**编译任务执行前**按
+`.flutter-plugins-dependencies` 的真实 dev 标记剔除对应行，不硬编码插件名。
+
+**守门**：`update_checker_test` 10 条 + `version_single_source_test` 5 条。
+**回退即红**：把版本比较退回字符串比 ⇒ `1.0.10 > 1.0.9` 判反、`0.9.9` 被误判成新版。
+app 全量 522/522（settings golden 因新增一行设置而重拍）。

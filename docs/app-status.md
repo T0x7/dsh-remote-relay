@@ -16,7 +16,7 @@
 | 项 | 数值 / 状态 |
 |---|---|
 | 核心包 `dsh_remote_core` | **222/222 测试绿**，`dart analyze` 0 issue（含 9 条**直连真引擎**的契约测试） |
-| Flutter 壳 | **501/501 测试绿**，`flutter analyze` 0 error / 0 warning（含 3 张 Golden） |
+| Flutter 壳 | **522/522 测试绿**，`flutter analyze` 0 error / 0 warning（含 3 张 Golden） |
 | i18n | zh / en **218 键**，键集机器校验一致 |
 | 设备 | Xiaomi Civi（2109119BC / Android 13），调试 APK 213 MB 已安装 |
 | 真引擎 | 本机 `127.0.0.1:3080` 常驻，装有 relay 插件，隧道 `connected` → `https://<relay-host>` |
@@ -31,6 +31,16 @@
 是认得的（`_resumeFromBackground` 拿内存里的 `_sessionId` 重开），此前缺的只是
 「杀掉再开」这一条路径。顺带补上 D-062 标题缓存漏掉的 `load()` 接线——它此前只写
 不读。详见 `docs/app-field-notes.md` §6.16。
+
+### 更新通道（D-114，2026-10-14）
+
+设置页「检查更新」：查 GitHub Releases，**只提示、只给下载链接，不自动安装**。
+不做自更新的硬理由：Android 没有签名密钥吊销机制（iOS 有），自动更新通道被攻破
+等于让攻击者往一台能远程操控电脑的手机里装任意代码；且自更新要求 App 长期持有发布
+签名私钥，泄露只能靠改包名止损。版本号以 `pubspec.yaml` 为唯一权威，「关于」页常量与
+CHANGELOG 由守门钉住（历史上三处版本号各说各话）。正式签名从环境变量读密钥，密钥
+在 `~/.config/dsh-remote/signing/`（仓库外）；发版走 `scripts/build-release.sh`
+（版本三重校验 → 密钥必须在仓库外 → `--split-per-abi` → 默认不发布）。
 
 ### 诊断 / 崩溃 / 操作日志（D-107，2026-10-13）
 

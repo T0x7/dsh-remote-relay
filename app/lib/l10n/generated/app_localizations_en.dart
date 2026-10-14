@@ -1296,4 +1296,46 @@ class L10nEn extends L10n {
 
   @override
   String get diagnosticsChannelEmpty => 'No entries in this channel.';
+
+  @override
+  String get settingsUpdateCheckTitle => 'Check for updates';
+
+  @override
+  String get settingsUpdateCheckSub =>
+      'Ask GitHub whether a newer build exists (prompt only, never auto-installs)';
+
+  @override
+  String get updateCheckIdle => 'Not checked yet';
+
+  @override
+  String get updateCheckChecking => 'Checking…';
+
+  @override
+  String updateCheckUpToDate(Object version) {
+    return 'Up to date ($version)';
+  }
+
+  @override
+  String updateCheckAvailable(Object latest) {
+    return 'New version $latest available';
+  }
+
+  @override
+  String updateCheckFailed(Object reason) {
+    return 'Check failed: $reason';
+  }
+
+  @override
+  String get updateCheckOpen => 'Open download page';
+
+  @override
+  String updateCheckSize(Object mb) {
+    return '$mb MB';
+  }
+
+  @override
+  String get updateErrBadJson => 'Response was not a JSON object';
+
+  @override
+  String get updateErrNoTag => 'That release has no version tag';
 }
