@@ -44,11 +44,35 @@ void main() {
         reason: '找不到 relay 源码，协议版本那处钉死无从对照');
   });
 
-  test('更新检查用的仓库名与「关于」页来源一致', () {
-    // 两处都指向同一个仓，拼错了会出现「检查更新永远 404」而没人发现。
-    expect(kSourceRepository, isNotEmpty);
-    expect(kSourceRepository, isNot(contains('https://')),
-        reason: '这里放的是仓库标识，不是完整 URL；URL 拼接在 update_check 里');
+  test('kSourceRepository 必须是 owner/repo —— 少 owner 就是 404', () {
+    // 这条守门第一次写错了方向：它只断言「不是完整 URL」，于是
+    // `kSourceRepository = 'dsh-remote-relay'`（少 owner）照样放行，
+    // 而更新检查拼出来的是 /repos/dsh-remote-relay/… ⇒ 404 ⇒「检查更新失败」。
+    // **断言必须指向真实的失败形态**，而不是一个"看起来像"的形式。
+    expect(kSourceRepository, matches(r'^[^/]+/[^/]+$'),
+        reason: '更新检查拼的是 api.github.com/repos/<kSourceRepository>/…，'
+            '只写仓库名会少一段 owner 直接 404');
+    expect(kSourceRepository, startsWith('T0x7/'),
+        reason: 'remote 指向 github.com:T0x7/dsh-remote-relay');
+  });
+
+  test('拼出来的 release 接口必须是 200（真实网络，发布后才成立）', () async {
+    // 这条要联网，且只在有发布时成立——所以它**不**是守门用例，
+    // 而是发版后手测。我把它写成普通 test 但默认跳过，用环境变量开。
+    if (Platform.environment['DSH_CHECK_RELEASE_NET'] != '1') {
+      markTestSkipped('设 DSH_CHECK_RELEASE_NET=1 才会真的打网络');
+      return;
+    }
+    final client = HttpClient()..userAgent = 'dsh-remote-app/$kAppVersion';
+    try {
+      final uri = Uri.https('api.github.com',
+          '/repos/$kSourceRepository/releases/latest');
+      final res = await (await client.getUrl(uri)).close();
+      expect(res.statusCode, 200,
+          reason: '「检查更新」失败的最常见原因就是这条 URL 拼错');
+    } finally {
+      client.close();
+    }
   });
 }
 

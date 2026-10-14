@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-10-14
+
+Fixes for the two defects that made v1.0.0 unusable in the field.
+
+### Fixed
+
+- **release 包完全没有网络权限**（D-114）—— `INTERNET`（以及扫码配对要的
+  `CAMERA`）只声明在 `src/debug` 与 `src/profile` 的 manifest 里，main（= release）
+  没有。症状：release 包装得上、启动不崩、签名也对，但配对 / 控制台 / 更新检查一律
+  `SocketException: Permission denied`。**只在 release 出现**——debug 包永远连得上，
+  所以任何在 debug 上的验证（包括「启动没崩」「能装上」「签名正确」）都发现不了它。
+- **更新检查拼错仓库路径**（D-114）—— `kSourceRepository` 是 `dsh-remote-relay`
+  （只有仓库名、没有 owner），拼出 `/repos/dsh-remote-relay/...` ⇒ 404 ⇒「检查更新
+  失败」。那条常量的注释还写着「remote 指向内网 Gitea」——那是过期信息，remote
+  早就是 `github.com:T0x7/...`。**一条注释过期、代码照着它写错，比没有注释更糟。**
+  首次写的守门方向也错了（只断言「不是完整 URL」，没断言「是不是 owner/repo」），
+  于是照样放行；已改成指向真实失败形态。
+
 ## [1.0.0] — 2026-10-14
 
 First shippable build: the diagnostic stack, credential lifecycle and console

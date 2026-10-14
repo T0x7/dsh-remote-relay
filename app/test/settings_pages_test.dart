@@ -160,7 +160,12 @@ void main() {
       expect(find.text(kAppVersion), findsOneWidget);
       expect(find.text('$kTunnelProtocolVersion'), findsOneWidget);
       expect(find.text(kLicense), findsOneWidget);
-      expect(find.text(kSourceRepository), findsOneWidget);
+      // 断言**常量本身**而不是写死的字面量：这条测试的本意是「值来自常量、
+      // 页面里没有第二份副本」，把仓库名写死等于制造一处必然漂移的副本
+      // （D-114 刚踩过：kSourceRepository 少了 owner 段，更新检查直接 404）。
+      expect(find.text(kSourceRepositoryUrl), findsOneWidget);
+      expect(find.text(kSourceRepository), findsNothing,
+          reason: '「关于」页应展示完整地址，不是 owner/repo 片段');
     });
   });
 

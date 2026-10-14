@@ -92,7 +92,12 @@ if [ "${DSH_RELEASE_PUBLISH:-}" != "1" ]; then
 fi
 
 command -v gh >/dev/null || die "需要 gh CLI（brew install gh）"
-( cd "$ROOT" && git tag -a "v$SEMVER" -m "v$SEMVER" && git push origin "v$SEMVER" )
+# tag 已存在不该中断整个发布（补传产物是常态：先推了代码、后来才想起传包）
+if git -C "$ROOT" rev-parse -q --verify "refs/tags/v$SEMVER" >/dev/null; then
+  say "tag v$SEMVER 已存在，跳过打 tag"
+else
+  ( cd "$ROOT" && git tag -a "v$SEMVER" -m "v$SEMVER" && git push origin "v$SEMVER" )
+fi
 gh release create "v$SEMVER" "${APKS[@]}" "$AAB" --repo "$REPO_SLUG" \
   --title "v$SEMVER" --generate-notes
 say "已发布 v$SEMVER —— App 的「检查更新」下一次就能看到它"

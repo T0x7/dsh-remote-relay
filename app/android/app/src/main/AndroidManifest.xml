@@ -2,6 +2,14 @@
     <!-- D-056: 屏 H 调 BiometricPrompt。没有这条权限，local_auth 在 Android
          上会直接答不可用，锁屏就会静默退回到「设备不支持」那一档。 -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- D-114：INTERNET 必须在这里声明，**不能只在 debug/profile 里**。
+         Flutter 模板默认把它放在 src/debug 与 src/profile 的 manifest 里，于是
+         release 包**根本没有网络权限**——配对、控制台、更新检查全部以
+         `SocketException: Permission denied` 失败。
+         这个 bug 只在 release 包出现：debug 构建永远连得上，所以任何在
+         debug 包上做的验证（包括"启动没崩""包能装"）都发现不了它。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <application
         android:label="dsh remote"
         android:name="${applicationName}"

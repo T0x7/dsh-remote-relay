@@ -43,6 +43,42 @@ void main() {
     });
   });
 
+  // D-114：这一组是**release-only**的洞，debug 包永远测不出来。
+  //
+  // Flutter 模板把 INTERNET 权限放在 src/debug 与 src/profile 的 manifest 里，
+  // main（= release）没有。症状：release 包装得上、启动不崩、签名也对，但
+  // **完全没有网络**——配对、控制台、更新检查一律 `SocketException: Permission
+  // denied`。任何在 debug 包上做的验证（包括"启动没崩""能装上""签名正确"）
+  // 都不可能发现它。所以只能静态断言。
+  group('release 包必须真的有网络权限（D-114）', () {
+    test('main manifest 声明 INTERNET——release 的网络全靠它', () {
+      final main = manifestFile.readAsStringSync();
+      expect(main, contains('android.permission.INTERNET'),
+          reason: '只在 debug/profile manifest 里声明 INTERNET ⇒ release 包无网络'
+              '权限，配对/控制台/更新检查全挂，而 debug 包永远看不出来');
+    });
+
+    test('配对要用相机，所以 CAMERA 也必须在 main（不只是 debug）', () {
+      expect(manifestFile.readAsStringSync(),
+          contains('android.permission.CAMERA'),
+          reason: '同一条release-only 陷阱：扫码配对是屏 B 的主路径');
+    });
+
+    test('不给 release 留任何"只在 debug 里有"的权限', () {
+      // 反向检查：把 debug manifest 独有的权限列出来，若有人只加在那里就红。
+      final debugOnly = RegExp(r'android:name="android.permission.([A-Z_]+)"')
+          .allMatches(File('android/app/src/debug/AndroidManifest.xml').readAsStringSync())
+          .map((m) => m.group(1))
+          .where((n) => n != 'INTERNET')
+          .toSet();
+      final mainText = manifestFile.readAsStringSync();
+      for (final perm in debugOnly) {
+        expect(mainText, contains('android.permission.$perm'),
+            reason: '$perm 只在 debug manifest 里声明 ⇒ release 包没有它');
+      }
+    });
+  });
+
   group('防截屏 / 防录屏（D-113）', () {
     test('MainActivity 设置 FLAG_SECURE', () {
       final kt = File(

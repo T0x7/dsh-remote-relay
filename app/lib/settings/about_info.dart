@@ -12,7 +12,7 @@
 ///
 /// 这里**不**引 `package_info_plus` 去运行时读包信息：那要进依赖白名单，而本 App
 /// 是自部署自签名的调试工具，版本一致性用一条守门钉住就够了，不必为它多一个依赖。
-const String kAppVersion = '1.0.0';
+const String kAppVersion = '1.0.1';
 
 /// 隧道协议版本。`docs/protocol.md`「Data plane (`v: 1`)」与
 /// `server/src/index.ts` 的 `v: 1 as const` 共同钉死；PRD §7.3 要求 App
@@ -22,6 +22,15 @@ const int kTunnelProtocolVersion = 1;
 /// 许可证。仓库根 `LICENSE` 为 MIT，`package.json` 的 `license` 字段同。
 const String kLicense = 'MIT';
 
-/// 源码仓库标识。git remote 目前指向内网 Gitea，没有可公开引用的地址，
-/// 所以只放仓库名；要补公网地址时改这一处即可。
-const String kSourceRepository = 'dsh-remote-relay';
+/// 源码仓库标识，**必须是 `owner/repo` 全路径**——D-114 的更新检查就是拿它拼
+/// `https://api.github.com/repos/<这里>/releases/latest`，只写仓库名会拼出
+/// `/repos/dsh-remote-relay/…`（少了 owner）⇒ 404 ⇒「检查更新失败」。
+///
+/// （本条曾写着「remote 指向内网 Gitea，只放仓库名」——那是过期信息：remote
+/// 早已是 `git@github.com:T0x7/dsh-remote-relay.git`。一条注释过期、而代码
+/// 照着它写错的实例。）
+const String kSourceRepository = 'T0x7/dsh-remote-relay';
+
+/// 完整仓库地址，给「关于」页展示用。
+const String kSourceRepositoryUrl =
+    'https://github.com/$kSourceRepository';

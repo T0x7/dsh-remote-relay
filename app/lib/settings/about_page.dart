@@ -24,7 +24,7 @@ class AboutPage extends StatelessWidget {
           _Row(l10n.aboutAppVersion, kAppVersion),
           _Row(l10n.aboutProtocolVersion, '$kTunnelProtocolVersion'),
           _Row(l10n.aboutLicense, kLicense),
-          _Row(l10n.aboutSource, kSourceRepository),
+          _Row(l10n.aboutSource, kSourceRepositoryUrl),
           const SizedBox(height: AppTheme.m),
           Container(
             padding: const EdgeInsets.all(AppTheme.m),
