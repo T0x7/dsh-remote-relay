@@ -111,11 +111,43 @@ if [ "${DSH_RELEASE_PUBLISH:-}" != "1" ]; then
   say "发布步骤："
   say "  1) git tag -a v$SEMVER -m 'v$SEMVER' && git push origin v$SEMVER"
   say "  2) gh release create v$SEMVER ${APKS[*]} $AAB --repo $REPO_SLUG \\"
-  say "       --title 'v$SEMVER' --notes-file <(git log v$SEMVER -1 --pretty=%B)"
+  say "       --title 'v$SEMVER' --prerelease --notes-file <(awk 从 app/CHANGELOG.md 取 ## [$SEMVER] 段)"
+  say "  3) 正式版（非 beta）才加 DSH_RELEASE_PUBLISH=1 DSH_RELEASE_PRERELEASE=0 重跑"
   exit 0
 fi
 
 command -v gh >/dev/null || die "需要 gh CLI（brew install gh）"
+
+# D-115：beta 定位必须**显式**打 --prerelease，漏了就发成 stable release。
+#
+# 这不是装饰：本项目首个公开版（v0.0.1）就标成 beta，CHANGELOG 与「关于」页都
+# 这么定位。而且 App 的更新检查是**故意**打 /releases 列表而不是 /releases/latest
+# ——正因为 latest 排除 prerelease（docs/app-field-notes.md §6.24）。
+# 想发正式版：DSH_RELEASE_PRERELEASE=0，不用改脚本。
+PRE_ARGS=(--prerelease)
+if [ "${DSH_RELEASE_PRERELEASE:-1}" != "1" ]; then
+  PRE_ARGS=()
+  say "DSH_RELEASE_PRERELEASE=0 —— 发为正式版（不带 prerelease 标记）"
+fi
+
+# release 说明取 CHANGELOG 里对应版本那一段，而不是 --generate-notes：
+# CHANGELOG 是手写的、讲清了「为什么坏成那样」，git 自动摘要只有 commit 标题，
+# 对「这版修了什么、为什么之前不能用」这种关键信息一句话都说不出来。
+NOTES_FILE="$(mktemp)"
+trap 'rm -f "$NOTES_FILE"' EXIT
+awk -v v="$SEMVER" '
+  $0 ~ "^## \\[" v "\\]" { f = 1; next }
+  f && /^## \[/ { exit }
+  f { print }
+' "$APP/CHANGELOG.md" > "$NOTES_FILE"
+if [ -s "$NOTES_FILE" ]; then
+  NOTES_ARGS=(--notes-file "$NOTES_FILE")
+  say "release 说明取自 CHANGELOG 的 ## [$SEMVER] 段"
+else
+  NOTES_ARGS=(--generate-notes)
+  say "CHANGELOG 里没有 ## [$SEMVER] 段，退回 --generate-notes"
+fi
+
 # tag 已存在不该中断整个发布（补传产物是常态：先推了代码、后来才想起传包）
 if git -C "$ROOT" rev-parse -q --verify "refs/tags/v$SEMVER" >/dev/null; then
   say "tag v$SEMVER 已存在，跳过打 tag"
@@ -123,5 +155,6 @@ else
   ( cd "$ROOT" && git tag -a "v$SEMVER" -m "v$SEMVER" && git push origin "v$SEMVER" )
 fi
 gh release create "v$SEMVER" "${APKS[@]}" "$AAB" --repo "$REPO_SLUG" \
-  --title "v$SEMVER" --generate-notes
+  --title "v$SEMVER" \
+  ${PRE_ARGS[@]+"${PRE_ARGS[@]}"} ${NOTES_ARGS[@]+"${NOTES_ARGS[@]}"}
 say "已发布 v$SEMVER —— App 的「检查更新」下一次就能看到它"

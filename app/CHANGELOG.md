@@ -5,6 +5,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.2] — 2026-10-15
+
+修 release 包的扫码配对（屏 B）。**这两个 bug 都只在 release 出现，debug 包一切正常。**
+
+### Fixed
+
+- **D-115 — release 包的扫码配对（屏 B）相机不可用。** debug 包一直正常，只有
+  release 会报「相机不可用 / 错误：genericError」，且相机一次都没被打开过
+  （camera service 无 CONNECT 记录）。根因有两层，都是 AGP 9.x 默认的 R8
+  full mode 造成的：其一，mobile_scanner 用 `::defaultBarcodeScannerFactory`
+  这种伴生对象函数的可调用引用，其静态 `INSTANCE` 字段被 R8 连同伴生对象一起
+  剥空，lambda 照读即 NPE；其二（修掉第一层后才暴露），ML Kit 靠反射实例化的
+  `*Registrar` 无参构造器被剥，组件注册表查不到实现。插件自带的规则挡不住，因为
+  它写的是 `com.google.mlkit.*`——ProGuard 的 `*` 不跨包分隔符，盖不到子包。
+  修复：新增 `android/app/proguard-rules.pro` 保住 mobile_scanner 与 ML Kit 的类。
+  **注意：这一类问题在 debug 包上永远复现不出来，必须在 release 包上验证。**
+- **D-115 — 扫码失败时看不到真实原因。** mobile_scanner 把 `start()` 抛的任何
+  `PlatformException` 都硬编码映射成 `genericError`，真因只在 `errorDetails` 里；
+  界面此前只显示错误码枚举名，直接把 message 丢了。现在错误码与插件原文一并显示。
+- **D-115 — 更正 `MainActivity` 里一条被实测证伪的注释。** 它写着「`adb
+  screencap` 走 ADB 通道，不受 FLAG_SECURE 影响」——实测 `adb exec-out screencap
+  -p` 在 App 前台时返回 **0 字节空文件**。真机读界面请用 `uiautomator dump`。
+
 ## [0.0.1] — 2026-10-14
 
 首个公开发布的版本。**beta：功能尚未完整，接口与行为都可能变**，不承诺

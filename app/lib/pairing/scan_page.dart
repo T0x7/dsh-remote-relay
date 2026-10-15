@@ -55,7 +55,17 @@ class _ScanPageState extends State<ScanPage> {
               controller: _controller,
               onDetect: _onDetect,
               errorBuilder: (context, error, child) => _ScanError(
-                error: error.errorCode.name,
+                // D-115：`genericError` 本身毫无诊断价值——mobile_scanner 把 start()
+                // 抛的**任何** PlatformException 都硬编码映射成它
+                // （mobile_scanner_method_channel.dart:193-201，不是 firstWhere
+                // 兜底，是无条件写死）。真因（Android 侧的 "Error occurred when
+                // setting up camera!" / "No camera found..." 等）保存在
+                // errorDetails 里，不打出来就永远只剩一句没法查的 genericError。
+                error: [
+                  error.errorCode.name,
+                  if (error.errorDetails?.message != null)
+                    error.errorDetails!.message,
+                ].join(' · '),
                 onClose: () => Navigator.of(context).pop(),
               ),
             ),
@@ -100,6 +110,10 @@ class _ScanPageState extends State<ScanPage> {
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: AppTheme.danger)),
               ),
+            // D-115：上面这个 `_error` 是**死代码**——字段声明后再无任何赋值点，
+            // 所以它永远不会渲染。留着它会让人以为这一屏已经有过错误上报，
+            // 反而掩盖了「真因只走 errorBuilder」这件事，故在此标注（删除留待
+            // 单独的清理批次，避免和 D-115 的 release 修复混在一起）。
           ],
         ),
       );

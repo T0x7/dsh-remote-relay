@@ -46,6 +46,18 @@ void main() {
           if (assets != null) 'assets': assets, // ignore: use_null_aware_elements
         };
 
+    /// 从当前版本**推导**出一个必定更新的 tag。
+    ///
+    /// 同一个坑本文件已经踩过两次：下面「tag 比当前旧」那条写着「写死版本号会在
+    /// kAppVersion 降到 0.0.1 时红」，而**紧挨着**的 prerelease 那条却把
+    /// `v0.0.2` 写死当"比当前新"——发到 0.0.2 的当天它就成了「和当前相同」，
+    /// `isNewer` 返回 false，用例红。**教训：这类夹具必须从 kAppVersion 推导，
+    /// 且要一次改全**——修了同族的一条、留下另一条，等于把同一个 bug 推迟一轮。
+    String newerTag() {
+      final parts = kAppVersion.split('.');
+      return '${parts[0]}.${parts[1]}.${int.parse(parts[2]) + 1}';
+    }
+
     test('v 前缀能剥；新版本 → available + 挑 arm64 apk', () {
       final c = UpdateCheck.fromReleaseJson(release('v1.1.0', assets: [
         {'name': 'app-x86_64.apk', 'browser_download_url': 'u1', 'size': 1},
@@ -89,18 +101,19 @@ void main() {
       ]);
       expect(c.latest, '0.2.0',
           reason: '按版本号挑，不是按数组顺序；draft 必须跳过');
-      expect(c.available, isTrue, reason: '0.2.0 比当前 0.0.1 新');
+      expect(c.available, isTrue, reason: '0.2.0 比当前 $kAppVersion 新');
     });
 
     test('prerelease 也要能被看到——本项目自己就是 beta（走 fetch()）', () async {
       // ⚠️ 必须走 fetch()：直接调 fromReleaseList 时**改端点根本不会红**——
       // 这条守门一度是假绿的（今天第二次同族：守门守在了错误的层）。
       // 真正的不变量在 fetch() 选的那个 URL 上。
+      final newer = newerTag();
       Uri? hit;
       releaseFetcher = (uri) async {
         hit = uri;
         return jsonEncode([
-          {'tag_name': 'v0.0.2', 'prerelease': true, 'draft': false},
+          {'tag_name': 'v$newer', 'prerelease': true, 'draft': false},
         ]);
       };
       final c = await UpdateChecker.instance().fetch();
@@ -108,7 +121,7 @@ void main() {
           reason: '不能用 /releases/latest —— 它排除 prerelease，'
               '本项目首个公开版就标成 beta，那条路真机实测 404');
       expect(hit!.path, isNot(contains('/latest')));
-      expect(c.latest, '0.0.2');
+      expect(c.latest, newer);
       expect(c.available, isTrue);
     });
 

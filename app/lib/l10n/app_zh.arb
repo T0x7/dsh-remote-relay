@@ -93,7 +93,7 @@
   "settingsLanguageTitle": "语言",
   "settingsLanguageSub": "跟随系统 · 中文 / English（仅此两种）",
   "settingsAboutTitle": "关于",
-  "settingsAboutSub": "v0.0.1 · 隧道协议 v:1 · MIT 开源",
+  "settingsAboutSub": "v0.0.2 · 隧道协议 v:1 · MIT 开源",
   "settingsFooter": "零遥测 · 零崩溃收集 · 零第三方 SDK\n全部源码随 dsh-remote-relay 开源",
 
   "pinsHowTofu": "TOFU：首次连接时记下中继证书的指纹，之后每次连接都要对上；对不上就断开。",

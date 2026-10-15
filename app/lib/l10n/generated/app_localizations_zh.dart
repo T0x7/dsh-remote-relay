@@ -308,7 +308,7 @@ class L10nZh extends L10n {
   String get settingsAboutTitle => '关于';
 
   @override
-  String get settingsAboutSub => 'v0.0.1 · 隧道协议 v:1 · MIT 开源';
+  String get settingsAboutSub => 'v0.0.2 · 隧道协议 v:1 · MIT 开源';
 
   @override
   String get settingsFooter =>
