@@ -419,6 +419,9 @@
   "authCauseUnknown": "Cause unknown",
   "consoleCredentialDead": "Credential expired — it will not recover on its own",
   "consoleCredentialDeadWhy": "{cause} · re-pair to continue",
+  "@consoleCredentialDeadWhy": {
+    "placeholders": { "cause": { "type": "Object" } }
+  },
   "consoleGoRepair": "Re-pair now",
   "diagnosticsChannelLabel": "Log channel",
   "diagnosticsChannelAll": "All",

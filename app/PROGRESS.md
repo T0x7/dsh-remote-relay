@@ -1116,10 +1116,13 @@ manifest 里**根本没有** `android:allowBackup` 那一行——靠「日志�
   现以 pubspec 为权威，`about_info` 改 1.0.0，CHANGELOG 封 `## [1.0.0]`，并用
   `test/version_single_source_test.dart`（5 条）把三方钉住。**不引
   `package_info_plus`**：那要过依赖白名单纪律，而版本一致性用守门钉住就够。
-- **更新检查**（`lib/services/update_checker.dart`）：查 `releases/latest`，**只按
-  版本号判新旧**——GitHub 的 latest 是按发布时间挑的，顺序一错就会把旧版当新版推
-  给用户（用例 `0.9.9` 那条就是钉这个）。版本比较自写 10 行，不引 `pub_semver`。
+- **更新检查**（`lib/services/update_checker.dart`）：打 `/releases` **列表**并按
+  **版本号**挑最高（不是 `/releases/latest`，见 §6.24——latest 按发布时间挑且排除
+  prerelease，两个毛病叠在一起）。**只按版本号判新旧**：发版顺序一乱就会把旧版当
+  新版推给用户（用例 `0.9.9` 那条就是钉这个）。版本比较自写 10 行，不引 `pub_semver`。
   挑 APK 优先 arm64（小米 Civi）。每次检查落一行 `action=update.check` audit。
+  （D-115 更正：本条原文写的是「查 `releases/latest`」，那是**端点改掉之前**的状态。
+  一个按版本比较的更新通道，版本号必须真的变——见 §6.27。）
 - **零硬编码文案守卫当场立功**：我第一版把错误消息写成中文，守卫逮到 2 处。改成
   `UpdateError` 枚举 + l10n 文案，checker 仍不 import Flutter。
 - **正式签名**：`build.gradle.kts` 此前 release 借�� **debug 签名**（换机器就丢）。
@@ -1143,3 +1146,46 @@ flutter_secure_storage / url_launcher 这些真插件——而是在**编译任�
 **守门**：`update_checker_test` 10 条 + `version_single_source_test` 5 条。
 **回退即红**：把版本比较退回字符串比 ⇒ `1.0.10 > 1.0.9` 判反、`0.9.9` 被误判成新版。
 app 全量 522/522（settings golden 因新增一行设置而重拍）。
+
+### D-115 release 包的扫码配对相机不可用（R8 full mode，两层）+ 发 0.0.2 beta
+
+运维报「真机上扫码一直说相机不可用」。第一反应是权限或机型——都不是。
+
+- **排除法很快，但有一条是决定性的**：CAMERA `granted=true`；`pm list features`
+  有 `camera.level.full`；GMS 26.34 在跑未停用。可 `dumpsys media.camera` 的事件日志里
+  **当天没有任何 CONNECT 记录**——相机一次都没被打开过 ⇒ 失败发生在 CameraX 绑定
+  **之前**。这一条比读 UI 文案可靠：文案可能骗人，CONNECT 记录不会。
+- **真凶是 R8 full mode，而且分两层**。debug 包一切正常，所以本地任何验证（包括
+  「启动没崩」「装得上」「签名对」）都不可能发现它。
+  1. mobile_scanner 的 `::defaultBarcodeScannerFactory`（`MobileScanner.kt:46`）是
+     **伴生对象函数**的可调用引用，编译成持有静态 `INSTANCE` 字段的 lambda。R8 内联
+     方法体后判定伴生对象无人使用，连 `<clinit>` 一起删——线上 APK 里 jadx 反编译
+     出来是**空类** `public final class ok0 {}`，lambda 照读 ⇒ NPE。
+  2. 补上 keep 规则后 **NPE 只挪了一行**。真因是 ML Kit 靠 `Class.getConstructor()`
+     **反射**实例化 `*Registrar`，full mode 把无参构造器当死代码剥了（启动日志三条
+     `NoSuchMethodException: ...Registrar.<init> []`），组件注册表查不到实现。
+- **插件自带的规则挡不住第 2 层**：mobile_scanner 的 `proguard-rules.pro` 写的是
+  `com.google.mlkit.*`，而 **ProGuard 的 `*` 不匹配包分隔符**，一个子包都没盖到，
+  必须 `**`。修法落在本仓 `app/android/app/proguard-rules.pro`（不必改
+  `build.gradle.kts`——Flutter 插件靠「这个路径的文件存在」自动 `proguardFiles.add`，
+  是 add 不是 set）。
+- **顺带的可观测性修复**：mobile_scanner 把 `start()` 抛的任何 `PlatformException`
+  都硬编码映射成 `genericError`，真因只在 `errorDetails` 里，而界面只显示错误码枚举名、
+  把 message 丢了。这就是第一轮排查只能靠猜的原因。现在两者一并显示。
+- **纠正一条被实测证伪的注释**：`MainActivity` 写着「`adb screencap` 走 ADB 通道，
+  不受 FLAG_SECURE 影响」——实测 `adb exec-out screencap -p` 返回 **0 字节空文件**
+  （本次读界面就被它带偏一轮）。改用 `uiautomator dump`，注意 Flutter 的语义标签在
+  `content-desc` 上、不在 `text`。
+- **守门**：`android_hardening_test` 加 4 条（6 → 10）。**回退即红**：删掉任一条 keep
+  规则、或把它换成 `-dontwarn`（静音告警、INSTANCE 照样被剥），立刻红。app 全量 556/556。
+- **发 0.0.2 而不是重发 0.0.1**：更新检查是 `available = isNewer(线上 tag, 当前版本)`，
+  版本号相等 ⇒ false ⇒ 界面显示「已是最新」。**重发 0.0.1 等于把修复静默作废**——已经
+  装了坏包的人永远收不到提示。升 0.0.2 后实测：装 0.0.1 的用户 `available=True`。
+- **顺手补的两个洞**：① `build-release.sh` 的 `gh release create` 原本不带
+  `--prerelease`，会把 beta 项目发成 stable release，已补并留 `DSH_RELEASE_PRERELEASE=0`
+  的正式版口，release 说明改取 CHANGELOG 对应段；② `update_checker_test` 里「比当前新」
+  被硬编码成 `v0.0.2`，发到 0.0.2 当天就会红——**该文件隔壁用例的注释早就记过这个坑**
+  （当时只修了那一条），现已统一改成从 `kAppVersion` 推导。
+- **线上产物本身的验收**：发布后把 arm64 包**下载回来**，SHA-256 与本地产物一致，
+  再装机验相机（`State: 2`）与版本（2002 / 0.0.2）。理由见 §6.26：这次修的正是
+  「测试产物与发布产物行为不一致」这一类问题，那就得用发布产物验发布产物。
