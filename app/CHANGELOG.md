@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.3] — 2026-10-15
+
+升级扫码插件 `mobile_scanner` 5.2.3 → 7.4.2（`docs/upgrade-mobile-scanner-7.md`
+是执行依据，含逐项证据）。
+
+### Changed
+
+- **修掉一条我们正在踩的订阅泄漏。** 5.2.3 的 `controller.dispose()` 不取消条码事件
+  订阅（只有 `stop()` 会），而扫码页正是 dispose-without-stop 且被反复开合——每次
+  配对、扫码↔粘贴切换都泄漏一次。7.x 的 `dispose()` 自行取消订阅并加了平台会话
+  归属检查（跨控制器误删也一并修了）。同批收益：ImageProxy 不释放导致的扫码永久
+  停摆（7.4.1）、CameraX 启动失败宿主崩溃（7.4.1）、控制器初始化黑屏无报错（7.0.0）。
+- **移植成本实测为 1 行**：7.0 起 `errorBuilder` 从三参改两参
+  （`MobileScannerErrorBuilder` typedef 已删）；其余符号原样兼容。
+- CameraX 1.3.3 → 1.6.1，ML Kit 条码 17.2.0 → 17.3.0。
+
+### Fixed
+
+- **澄清：R8 keep 规则在 7.4.2 下仍然必需，勿删。** `::defaultBarcodeScannerFactory`
+  在 7.4.2 源码里依然存在（伴生对象可调用引用，R8 full mode 的雷没排掉）；插件自带
+  的 consumer 规则对 gms internal 包仍是单星号（ProGuard 的 `*` 不跨包分隔符）。
+  本仓 `android/app/proguard-rules.pro` 的两条 keep 均严格更优，D-115 的守门测试
+  继续钉住它们。
+
 ## [0.0.2] — 2026-10-15
 
 修 release 包的扫码配对（屏 B）。**这两个 bug 都只在 release 出现，debug 包一切正常。**

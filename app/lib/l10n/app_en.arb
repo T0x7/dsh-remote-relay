@@ -93,7 +93,7 @@
   "settingsLanguageTitle": "Language",
   "settingsLanguageSub": "Follow system · 中文 / English (only these)",
   "settingsAboutTitle": "About",
-  "settingsAboutSub": "v0.0.2 · tunnel protocol v:1 · MIT",
+  "settingsAboutSub": "v0.0.3 · tunnel protocol v:1 · MIT",
   "settingsFooter": "Zero telemetry · zero crash reporting · zero third-party SDKs\nOpen source with dsh-remote-relay",
 
   "pinsHowTofu": "TOFU: the relay certificate's fingerprint is remembered on first connect and must match on every connect after that; a mismatch breaks the link.",

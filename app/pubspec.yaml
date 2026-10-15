@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.0.2+2
+version: 0.0.3+3
 
 environment:
   sdk: ^3.13.4
@@ -43,7 +43,7 @@ dependencies:
   # 相机扫码（设计 屏 B 取景；白名单计划 T1.8）+ 浏览器逃生舱真实跳转
   # （url_launcher：Flutter 官方第一方包，逃生舱按钮从复制链接升级为
   # 直接打开；如需保持零新增可撤，PROGRESS D-008 记录）。
-  mobile_scanner: ^5.2.3
+  mobile_scanner: ^7.4.2
   url_launcher: ^6.2.5
 
   # The following adds the Cupertino Icons font to your application.

@@ -54,7 +54,7 @@ class _ScanPageState extends State<ScanPage> {
             MobileScanner(
               controller: _controller,
               onDetect: _onDetect,
-              errorBuilder: (context, error, child) => _ScanError(
+              errorBuilder: (context, error) => _ScanError(
                 // D-115：`genericError` 本身毫无诊断价值——mobile_scanner 把 start()
                 // 抛的**任何** PlatformException 都硬编码映射成它
                 // （mobile_scanner_method_channel.dart:193-201，不是 firstWhere
